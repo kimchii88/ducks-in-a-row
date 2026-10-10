@@ -718,11 +718,14 @@ textarea { resize: vertical; margin-bottom: 14px; font-family: var(--font); }
 .mobile .tools:not([open]) summary { font-size: 12px; }
 .mobile .toast { bottom: 112px; }
 
-/* Form and farmhouse fill the screen; the area above the keyboard is --vvh */
-.mobile .modal-wrap.full {
+/* Every pop-up sits in the area above the keyboard (--vvh), so a confirmation
+   is never hidden behind it. The form and farmhouse fill that area. */
+.mobile .modal-wrap {
   top: var(--vvt, 0px);
   bottom: auto;
   height: var(--vvh, 100%);
+}
+.mobile .modal-wrap.full {
   padding: 0;
   align-items: stretch;
 }

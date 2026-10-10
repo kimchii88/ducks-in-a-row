@@ -852,6 +852,7 @@
       $('confirmBody').textContent = body;
       $('confirmOk').textContent = ok;
       $('confirmCancel').textContent = cancel;
+      document.activeElement?.blur?.(); // put the phone keyboard away so the question isn't hidden behind it
       wrap.hidden = false;
       $('confirmCancel').focus(); // safe option is the default
       const done = (v) => {
@@ -914,8 +915,14 @@
     editingId = null;
     back?.focus?.({ preventScroll: true });
   }
+  // New duck: only ask if something was typed (picking a date alone doesn't count).
+  // Editing: ask if anything changed.
+  function formDirty() {
+    if (editingId) return formState() !== formSnapshot;
+    return !!(fTask.value.trim() || fNotes.value.trim());
+  }
   async function requestCloseForm() {
-    if (formState() !== formSnapshot) {
+    if (formDirty()) {
       const discard = await confirmDialog({
         title: 'Discard changes?',
         body: "What you've typed won't be saved.",
