@@ -11,6 +11,10 @@
   --sulky: #6a7fa8;
   --mad: #c0392b;
   --font: "Pixelify Sans", ui-monospace, Menlo, monospace;
+  /* Phone layout: one place for the sizes every full-screen panel uses */
+  --m-gutter: 16px;
+  --m-head: 56px;
+  --tap: 44px;
   --px: 3px;
 }
 
@@ -273,7 +277,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
 @keyframes bubble-pop {
   from { opacity: 0; transform: scale(0.9); }
 }
-.card-handle { display: none; }
 .card-tail {
   position: absolute;
   top: var(--tail-y, 20px);
@@ -436,22 +439,14 @@ button { font: inherit; color: inherit; cursor: pointer; }
   width: auto;
   min-width: 0;
   max-width: none;
-  padding: 10px 16px max(24px, env(safe-area-inset-bottom)) 20px;
+  padding: 16px 16px max(24px, env(safe-area-inset-bottom)) 20px;
   box-shadow: 0 calc(var(--b) * -1) 0 var(--card-brown);
   animation: none;
   transition: transform 0.2s;
 }
 /* Tail points up at the duck standing above the sheet */
 .card.sheet .card-tail { top: -21px; left: var(--tail-x, 50%); transform: rotate(90deg); }
-.card.sheet .card-handle {
-  display: block;
-  width: 44px;
-  height: 5px;
-  margin: 0 auto 10px;
-  border-radius: 3px;
-  background: #c9b48f;
-}
-.card.sheet .card-actions { top: 22px; }
+.card.sheet .card-actions { top: 6px; }
 .card.sheet .task-title { font-size: 22px; }
 
 /* ---------- Undo toast ---------- */
@@ -526,7 +521,8 @@ button { font: inherit; color: inherit; cursor: pointer; }
 }
 .modal h2 { margin: 0 0 12px; font-size: 22px; font-weight: 600; }
 .modal p { margin: 0 0 16px; font-size: 15px; line-height: 1.45; color: var(--ink-soft); }
-.modal-close { position: absolute; top: 14px; right: 10px; }
+.modal-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: -6px -10px 6px 0; }
+.modal-head h2 { margin: 0; }
 .modal-sm { width: min(340px, 100%); }
 .modal-actions { display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
 
@@ -601,8 +597,9 @@ textarea { resize: vertical; margin-bottom: 14px; font-family: var(--font); }
   border: var(--px) solid var(--ink);
   box-shadow: 0 var(--px) 0 var(--ink);
 }
-.primary-btn { width: 100%; margin-top: 10px; color: #fff; background: var(--green); }
+.primary-btn { width: 100%; color: #fff; background: var(--green); }
 .primary-btn:hover { background: var(--green-dark); }
+.modal-foot { margin-top: 10px; }
 .secondary-btn { background: #fff; }
 .secondary-btn:hover { background: var(--cream-2); }
 .danger-btn { color: #fff; background: var(--red); }
@@ -706,13 +703,63 @@ textarea { resize: vertical; margin-bottom: 14px; font-family: var(--font); }
 .tools button:hover { background: var(--cream-2); }
 .tools-clock { margin: 0; padding: 6px 10px; font-size: 12px; color: var(--ink-soft); border-top: 1px solid var(--cream-2); }
 
-@media (max-width: 640px) {
-  .hud-title { font-size: 15px; }
-  .hud-count { font-size: 12px; }
-  .tools { bottom: auto; top: 12px; right: 12px; }
-  .tools:not([open]) summary { font-size: 12px; }
-  .toast { bottom: 112px; }
+/* ---------- Phones ----------
+   app.js decides what counts as a phone (isMobile) and sets .mobile on <html>,
+   so the code and the styles always agree. */
+.mobile .hud-title { font-size: 15px; }
+.mobile .hud-count { font-size: 12px; }
+.mobile .tools { bottom: auto; top: 12px; right: 12px; }
+.mobile .tools:not([open]) summary { font-size: 12px; }
+.mobile .toast { bottom: 112px; }
+
+/* Form and farmhouse fill the screen; the area above the keyboard is --vvh */
+.mobile .modal-wrap.full {
+  top: var(--vvt, 0px);
+  bottom: auto;
+  height: var(--vvh, 100%);
+  padding: 0;
+  align-items: stretch;
 }
+.mobile .modal-full {
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  padding: 0 var(--m-gutter) max(var(--m-gutter), env(safe-area-inset-bottom));
+  border: 0;
+  box-shadow: none;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  animation: sheet-up 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.mobile .modal-full > * { flex-shrink: 0; }
+.mobile .modal-full .link-btn { align-self: flex-start; }
+@keyframes sheet-up { from { transform: translateY(100%); } }
+.mobile .modal-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  min-height: var(--m-head);
+  margin: 0 calc(var(--m-gutter) * -1) 10px;
+  padding: max(6px, env(safe-area-inset-top)) 6px 0 var(--m-gutter);
+  background: var(--cream);
+  border-bottom: 2px solid var(--cream-2);
+}
+.mobile .modal-head .icon-btn { width: var(--tap); height: var(--tap); }
+/* Hatch / Save stays above the keyboard while the form scrolls */
+.mobile .modal-foot {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  margin: auto calc(var(--m-gutter) * -1) 0; /* auto: sits at the bottom even when the form is short */
+  padding: 10px var(--m-gutter) 12px;
+  background: var(--cream);
+  border-top: 2px solid var(--cream-2);
+}
+/* Smaller duck preview so the task field is visible straight away */
+.mobile .preview { flex-direction: row; justify-content: center; gap: 10px; padding: 6px 0; }
+.mobile .preview img { height: 40px; }
+/* Bottom sheet closes with its × only (no swipe, no tapping outside) */
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }

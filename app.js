@@ -74,6 +74,18 @@
   const coarse = matchMedia('(pointer: coarse)');
   const isMobile = () => coarse.matches || innerWidth < 640;
   const maxActive = () => (isMobile() ? 8 : 15); // fewer ducks fit on a phone's meadow
+  // isMobile is the single definition of "phone": styles hang off .mobile on <html>
+  const syncMobile = () => document.documentElement.classList.toggle('mobile', isMobile());
+  // Track the area above the on-screen keyboard so full-screen panels and the
+  // sticky Hatch button sit above it (iOS doesn't resize the page for the keyboard)
+  function syncViewport() {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    document.documentElement.style.setProperty('--vvh', vv.height + 'px');
+    document.documentElement.style.setProperty('--vvt', vv.offsetTop + 'px');
+  }
+  window.visualViewport?.addEventListener('resize', syncViewport);
+  window.visualViewport?.addEventListener('scroll', syncViewport);
 
   // ---------- Time ----------
   let offsetDays = 0;
@@ -651,7 +663,8 @@
     toast.classList.toggle('top', sheetOpen);
   }
 
-  scrim.addEventListener('pointerdown', (ev) => { ev.preventDefault(); ev.stopPropagation(); closeCard(); });
+  // Tapping outside closes the card on desktop; on phones only the × does
+  scrim.addEventListener('pointerdown', (ev) => { ev.preventDefault(); ev.stopPropagation(); if (!isMobile()) closeCard(); });
   $('cardClose').addEventListener('click', () => closeCard());
   $('cardEdit').addEventListener('click', () => {
     const id = openId;
@@ -706,22 +719,6 @@
     renderHud();
   }
 
-  // Swipe the bottom sheet down to close
-  let swipe = null;
-  card.addEventListener('touchstart', (ev) => {
-    if (!card.classList.contains('sheet') || ev.target.closest('button, label')) return;
-    swipe = { y: ev.touches[0].clientY, dy: 0 };
-  }, { passive: true });
-  card.addEventListener('touchmove', (ev) => {
-    if (!swipe) return;
-    swipe.dy = Math.max(0, ev.touches[0].clientY - swipe.y);
-    card.style.transform = `translateY(${swipe.dy}px)`;
-  }, { passive: true });
-  card.addEventListener('touchend', () => {
-    if (!swipe) return;
-    if (swipe.dy > 70) closeCard(); else card.style.transform = '';
-    swipe = null;
-  });
 
   // ---------- Timed undo (tick off and delete) ----------
   let pending = null; // { type: 'done' | 'delete', id, left, paused, ... }
@@ -865,7 +862,7 @@
       };
       $('confirmOk').onclick = () => done(true);
       $('confirmCancel').onclick = () => done(false);
-      wrap.onclick = (ev) => { if (ev.target === wrap) done(false); };
+      wrap.onclick = (ev) => { if (ev.target === wrap && !isMobile()) done(false); };
       wrap._esc = () => done(false);
     });
   }
@@ -954,7 +951,7 @@
     editingId = null;
     deleteDuck(id);
   });
-  formWrap.addEventListener('pointerdown', (ev) => { if (ev.target === formWrap) requestCloseForm(); });
+  formWrap.addEventListener('pointerdown', (ev) => { if (ev.target === formWrap && !isMobile()) requestCloseForm(); });
 
   form.addEventListener('submit', (ev) => {
     ev.preventDefault();
@@ -1093,7 +1090,7 @@
   function closeFarm() { $('farmWrap').hidden = true; lastFocus?.focus?.({ preventScroll: true }); }
   farmBtn.addEventListener('click', openFarm);
   $('farmClose').addEventListener('click', closeFarm);
-  $('farmWrap').addEventListener('pointerdown', (ev) => { if (ev.target === $('farmWrap')) closeFarm(); });
+  $('farmWrap').addEventListener('pointerdown', (ev) => { if (ev.target === $('farmWrap') && !isMobile()) closeFarm(); });
 
   // ---------- Keyboard ----------
   document.addEventListener('keydown', (ev) => {
@@ -1163,6 +1160,8 @@
 
   // ---------- Boot ----------
   function relayout() {
+    syncMobile();
+    syncViewport();
     layout();
     rt.forEach((e) => {
       if (e.mode === 'land' && !e.route) {
@@ -1180,6 +1179,8 @@
   stage.addEventListener('scroll', () => { stage.scrollTop = 0; stage.scrollLeft = 0; });
 
   load();
+  syncMobile();
+  syncViewport();
   layout();
   currentMad = madId();
   active().forEach((d) => makeEntity(d));
