@@ -780,6 +780,11 @@ html.mobile:has(.modal-wrap.full:not([hidden])) body { background: var(--cream);
 .mobile .preview { flex-direction: row; justify-content: center; gap: 10px; padding: 6px 0; }
 .mobile .preview img { height: 40px; }
 .mobile.kb-open .modal-full .preview { display: none; }
+/* While typing, Hatch sits under the fields instead of being pinned to the
+   bottom. iOS slides the page to keep the cursor visible, and a pinned button
+   jitters while it catches up; an unpinned one just moves with the page. */
+.mobile.kb-open .modal-wrap.full { padding-bottom: 0; }
+.mobile.kb-open .modal-foot { position: static; margin-top: 12px; border-top: 0; }
 /* Bottom sheet closes with its × only (no swipe, no tapping outside) */
 
 @media (prefers-reduced-motion: reduce) {

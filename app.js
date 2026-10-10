@@ -77,34 +77,17 @@
   // isMobile is the single definition of "phone": styles hang off .mobile on <html>
   const syncMobile = () => document.documentElement.classList.toggle('mobile', isMobile());
   // Measure the on-screen keyboard (--kb) so pop-ups keep their content above it.
-  // iOS doesn't resize the page for the keyboard, it just covers it.
+  // iOS doesn't resize the page for the keyboard, it just covers it. The height
+  // alone (not how far the browser has slid the page) keeps --kb steady while
+  // iOS scrolls to show the cursor, so nothing jumps around.
   function syncViewport() {
     const vv = window.visualViewport;
     if (!vv) return;
-    const kb = Math.max(0, Math.round(innerHeight - vv.height - vv.offsetTop));
+    const kb = Math.max(0, Math.round(innerHeight - vv.height));
     document.documentElement.style.setProperty('--kb', kb + 'px');
     document.documentElement.classList.toggle('kb-open', kb > 100);
     if (debugEl) debugEl.textContent = `screen ${innerHeight} · visible ${Math.round(vv.height)} · offset ${Math.round(vv.offsetTop)} · kb ${kb}`;
   }
-  // Scroll lock for phones: while a pop-up is open, a drag may scroll the pop-up's
-  // own content (or a notes box) but never the page behind it. Otherwise iPhone
-  // browsers slide the whole page around under the keyboard and the pinned
-  // Hatch button jitters while it catches up.
-  let touchY = 0;
-  document.addEventListener('touchstart', (ev) => { touchY = ev.touches[0].clientY; }, { passive: true });
-  document.addEventListener('touchmove', (ev) => {
-    if (!isMobile() || !ev.target.closest?.('.modal-wrap')) return;
-    const dy = ev.touches[0].clientY - touchY; // > 0: finger moving down (scrolling up)
-    let el = ev.target;
-    for (; el && !el.classList?.contains('modal-wrap'); el = el.parentElement) {
-      const scrollable = el.scrollHeight > el.clientHeight + 1 && /auto|scroll/.test(getComputedStyle(el).overflowY);
-      if (!scrollable) continue;
-      const canUp = el.scrollTop > 0, canDown = el.scrollTop + el.clientHeight < el.scrollHeight - 1;
-      if ((dy > 0 && canUp) || (dy < 0 && canDown)) return; // let this box scroll
-    }
-    ev.preventDefault(); // nothing inside can scroll that way, so don't move the page
-  }, { passive: false });
-
   // ?debug shows the keyboard measurements on screen (for testing on a real phone)
   let debugEl = null;
   if (new URLSearchParams(location.search).has('debug')) {
@@ -113,7 +96,7 @@
     document.body.appendChild(debugEl);
   }
   window.visualViewport?.addEventListener('resize', syncViewport);
-  window.visualViewport?.addEventListener('scroll', syncViewport);
+  window.visualViewport?.addEventListener('scroll', () => { if (debugEl) syncViewport(); });
 
   // ---------- Time ----------
   let offsetDays = 0;
