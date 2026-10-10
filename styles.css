@@ -590,7 +590,7 @@ textarea { resize: vertical; margin-bottom: 14px; font-family: var(--font); }
 .chip:focus-visible { outline: 3px solid var(--green); outline-offset: 2px; }
 .date-input { margin-bottom: 10px; }
 
-.primary-btn, .secondary-btn, .danger-btn {
+.primary-btn, .secondary-btn, .keep-btn {
   min-height: 44px;
   padding: 8px 18px;
   font-size: 16px;
@@ -602,10 +602,16 @@ textarea { resize: vertical; margin-bottom: 14px; font-family: var(--font); }
 .modal-foot { margin-top: 10px; }
 .secondary-btn { background: #fff; }
 .secondary-btn:hover { background: var(--cream-2); }
-.danger-btn { color: #fff; background: var(--red); }
-.danger-btn:hover { background: var(--red-dark); }
-.primary-btn:focus-visible, .secondary-btn:focus-visible, .danger-btn:focus-visible { outline: 3px solid var(--green); outline-offset: 3px; }
-.primary-btn:active, .secondary-btn:active, .danger-btn:active { transform: translateY(2px); box-shadow: 0 1px 0 var(--ink); }
+/* Confirmations: the safe choice is the loud green button; the risky one stays
+   plain white and only shows red when you hover or tab to it */
+.keep-btn { color: #fff; background: var(--green); }
+.keep-btn:hover { background: var(--green-dark); }
+@media (hover: hover) {
+  .risky-btn:hover { color: var(--red); border-color: var(--red); background: #fff; box-shadow: 0 var(--px) 0 var(--red); }
+}
+.risky-btn:focus-visible { color: var(--red); border-color: var(--red); box-shadow: 0 var(--px) 0 var(--red); }
+.primary-btn:focus-visible, .secondary-btn:focus-visible, .keep-btn:focus-visible { outline: 3px solid var(--green); outline-offset: 3px; }
+.primary-btn:active, .secondary-btn:active, .keep-btn:active { transform: translateY(2px); box-shadow: 0 1px 0 var(--ink); }
 
 /* ---------- To-do dropdown ---------- */
 .drop {
