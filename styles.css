@@ -664,7 +664,6 @@ textarea { resize: vertical; margin-bottom: 14px; font-family: var(--font); }
 
 /* Farmhouse inventory */
 .modal-farm { width: min(460px, 100%); }
-.farm-sub { margin-bottom: 12px !important; }
 .farm-day { margin: 14px 0 6px; font-size: 14px; color: var(--ink-soft); }
 .farm-item {
   display: flex;
