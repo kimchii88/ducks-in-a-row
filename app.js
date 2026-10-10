@@ -1068,7 +1068,7 @@
       list.appendChild(n);
     }
     if (!done.length) {
-      list.insertAdjacentHTML('beforeend', `<div class="farm-empty"><img src="${src('sleep')}" alt=""><p>No ducks here yet. Ducks you finish swim in the river for the day, then move in here.</p></div>`);
+      list.insertAdjacentHTML('beforeend', `<div class="farm-empty"><img src="${src('sleep')}" alt=""><p>No ducks here! Completed tasks will have ducks swimming for the day. They will sleep in here the next day.</p></div>`);
     }
     let day = null;
     done.forEach((d) => {
