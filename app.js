@@ -7,11 +7,11 @@
     swim1: [121, 83, 1], swim2: [129, 78, 1], peck1: [112, 95, 1], peck2: [120, 94, 1],
     quack: [114, 100, 1], restless1: [113, 97, -1], restless2: [94, 101, -1],
     angry1: [105, 106, 1], angry2: [86, 105, -1], happy: [72, 111, 1], lookup: [97, 107, 1],
-    sleep: [101, 105, 1], shake: [158, 106, 1], run1: [112, 68, -1], run2: [131, 70, -1],
+    sleep: [101, 105, 1], run1: [112, 68, -1], run2: [131, 70, -1],
     egg2: [52, 66, 1],
     hatch1: [55, 66, 1], hatch2: [56, 66, 1], hatch3: [55, 66, 1], hatch4: [56, 76, 1],
     hatch5: [58, 85, 1], hatch6: [64, 100, 1], hatch7: [101, 108, 1],
-    feed: [70, 42, 1], fly1: [77, 74, 1], fly2: [108, 95, 1], fly3: [96, 87, 1], fly4: [142, 99, 1],
+    fly1: [77, 74, 1], fly2: [108, 95, 1], fly3: [96, 87, 1], fly4: [142, 99, 1],
   };
   const src = (k) => `assets/sprites/${k}.png`;
   Object.keys(S).forEach((k) => { new Image().src = src(k); });
@@ -28,19 +28,52 @@
   };
   const IDLE_POSES = ['idle', 'idle', 'lookup', 'squat'];
 
-  const MAX_ACTIVE = 20;
+  // Tiny pixel-art SVGs drawn from a character grid ('.' = empty)
+  function pixelSvg(rows, colours) {
+    const rects = [];
+    rows.forEach((row, y) => [...row].forEach((c, x) => {
+      if (colours[c]) rects.push(`<rect x="${x}" y="${y}" width="1" height="1" fill="${colours[c]}"/>`);
+    }));
+    return `<svg viewBox="0 0 ${rows[0].length} ${rows.length}" shape-rendering="crispEdges">${rects.join('')}</svg>`;
+  }
+  const HEART = pixelSvg([
+    '.BB...BB.',
+    'BRRB.BRRB',
+    'BRWRBRRRB',
+    'BRRRRRRRB',
+    '.BRRRRRB.',
+    '..BRRRB..',
+    '...BRB...',
+    '....B....',
+  ], { B: '#5c2a1c', R: '#e8505b', W: '#fff' });
+  // Speech-bubble tail pointing left; the last column covers the card's border
+  const TAIL = pixelSvg([
+    '....BC',
+    '...BCC',
+    '..BCCC',
+    '.BCCCC',
+    'BCCCCC',
+    '.BBCCC',
+    '...BBC',
+    '.....B',
+  ], { B: 'var(--card-brown)', C: 'var(--card-bg)' });
+
   const MAX_RIVER = 10;
   const UNDO_MS = 5000;
   const TAG_CHARS = 14;
+  const BUBBLE_CHARS = 60; // hover bubble shows a preview; the full task is in the card
   const SMART_DEFAULT_HOUR = 20;
+  const CROSS_CHANCE = 0.2; // how often a wandering duck goes round to the other bank
 
   // ---------- DOM ----------
   const $ = (id) => document.getElementById(id);
   const stage = $('stage'), world = $('world'), bubble = $('bubble'), egg = $('egg');
-  const farmBtn = $('farm'), scrim = $('scrim'), card = $('card');
+  const farmBtn = $('farm'), scrim = $('scrim'), card = $('card'), toast = $('toast');
+  $('cardTail').innerHTML = TAIL;
   const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
   const coarse = matchMedia('(pointer: coarse)');
   const isMobile = () => coarse.matches || innerWidth < 640;
+  const maxActive = () => (isMobile() ? 8 : 15); // fewer ducks fit on a phone's meadow
 
   // ---------- Time ----------
   let offsetDays = 0;
@@ -61,7 +94,8 @@
   function load() {
     try {
       const s = JSON.parse(localStorage.getItem(KEY));
-      if (s) { ducks = s.ducks || []; offsetDays = s.offsetDays || 0; }
+      // A delete still in its undo window when the page closed counts as deleted
+      if (s) { ducks = (s.ducks || []).filter((d) => !d.pendingDelete); offsetDays = s.offsetDays || 0; }
     } catch (e) { /* storage unavailable: start fresh */ }
   }
   function save() {
@@ -70,7 +104,7 @@
 
   // ---------- Duck helpers ----------
   const byId = (id) => ducks.find((d) => d.id === id);
-  const active = () => ducks.filter((d) => !d.completedAt);
+  const active = () => ducks.filter((d) => !d.completedAt && !d.pendingDelete);
   const overdue = (d) => !d.completedAt && d.due < today();
   function madId() {
     const o = active().filter(overdue).sort((a, b) => (a.due < b.due ? -1 : a.due > b.due ? 1 : a.createdAt - b.createdAt));
@@ -81,32 +115,39 @@
     if (!overdue(d)) return 'waiting';
     return d.id === currentMad ? 'mad' : 'sulky';
   }
-  function moodText(d) {
-    const m = mood(d);
-    if (m === 'done') return 'Fed and swimming';
-    if (m === 'mad') return `Overdue since ${prettyDate(d.due)} · very cross`;
-    if (m === 'sulky') return `Overdue since ${prettyDate(d.due)} · sulking`;
+  function dueText(d) {
+    if (overdue(d)) return `Overdue since ${prettyDate(d.due)}`;
     if (d.due === today()) return 'Due today';
     if (d.due === addDays(today(), 1)) return 'Due tomorrow';
     return `Due ${prettyDate(d.due)}`;
   }
-  function tagText(task) {
-    const t = task.trim();
-    if (t.length <= TAG_CHARS) return t;
-    let cut = t.slice(0, TAG_CHARS + 1);
+  const doneText = (d) => (d.completedAt
+    ? `Done at ${new Date(d.completedAt).toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' })}`
+    : 'Done'); // still in its undo window
+  const isDone = (d) => !!d.completedAt || (pending?.type === 'done' && pending.id === d.id);
+
+  // Cut at the last word break before the limit (or mid-word if there isn't one) and add …
+  function clip(text, max) {
+    const t = text.trim();
+    if (t.length <= max) return t;
+    let cut = t.slice(0, max + 1);
     const sp = cut.lastIndexOf(' ');
-    cut = sp >= 4 ? cut.slice(0, sp) : cut.slice(0, TAG_CHARS);
+    cut = sp >= 4 ? cut.slice(0, sp) : cut.slice(0, max);
     return cut.trimEnd() + '…';
   }
+  const tagText = (task) => clip(task, TAG_CHARS);
+
+  // Ducks done today swim in the river (latest 10); after that they live in the farmhouse
   function riverDucks() {
     const t = today();
-    return ducks.filter((d) => d.completedAt && dateStr(d.completedAt) === t)
+    return ducks.filter((d) => d.completedAt && !d.housed && dateStr(d.completedAt) === t)
       .sort((a, b) => b.completedAt - a.completedAt).slice(0, MAX_RIVER);
   }
 
   // ---------- Geometry ----------
   const G = {};
   const rand = (a, b) => a + Math.random() * (b - a);
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   function layout() {
     G.W = stage.clientWidth; G.H = stage.clientHeight;
     const sc = Math.max(G.W / 1672, G.H / 941);
@@ -122,17 +163,21 @@
     G.farm = { x: G.W - fw - 10, y: fy, w: fw, h: fh };
     Object.assign(farmBtn.style, { left: G.farm.x + 'px', top: G.farm.y + 'px', width: fw + 'px' });
     stage.style.setProperty('--tag-offset', Math.round(G.duckH + 4) + 'px');
-    // Land zones (duck feet coordinates)
+    // Land zones (duck feet). Unfinished ducks never touch the river.
     const tagSpace = 26;
-    G.zones = [];
     const topMin = 70 + G.duckH + tagSpace, topMax = G.riverTop - 10;
-    if (topMax - topMin > 20) G.zones.push({ x0: 72, x1: G.W - 72, y0: topMin, y1: topMax });
     const botMin = G.riverBottom + G.duckH * 0.75 + tagSpace, botMax = G.H - 120;
-    if (botMax - botMin > 20) G.zones.push({ x0: 72, x1: G.W - 72, y0: botMin, y1: botMax });
-    if (!G.zones.length) G.zones.push({ x0: 72, x1: G.W - 72, y0: G.H * 0.3, y1: G.H - 120 });
+    G.zones = {
+      top: topMax - topMin > 20 ? { x0: 72, x1: G.W - 72, y0: topMin, y1: topMax } : null,
+      bottom: botMax - botMin > 20 ? { x0: 72, x1: G.W - 72, y0: botMin, y1: botMax } : null,
+    };
+    if (!G.zones.top && !G.zones.bottom) G.zones.bottom = { x0: 72, x1: G.W - 72, y0: G.H * 0.3, y1: G.H - 120 };
     G.eggPos = { x: G.W / 2, y: G.H - 150 };
     G.front = { x: Math.max(60, G.W * 0.2), y: G.H - 70 };
   }
+  const otherSide = (s) => (s === 'top' ? 'bottom' : 'top');
+  const zone = (side) => G.zones[side] || G.zones[otherSide(side)];
+  const realSide = (side) => (G.zones[side] ? side : otherSide(side));
   function blocked(x, y) {
     const f = G.farm;
     if (x > f.x - 30 && x < f.x + f.w + 30 && y > f.y - 10 && y < f.y + f.h + G.duckH + 30) return true;
@@ -140,30 +185,26 @@
     if (x < 230 && y < 70 + G.duckH + 30) return true; // HUD
     return false;
   }
-  function randomLandPoint() {
-    const area = (z) => (z.x1 - z.x0) * (z.y1 - z.y0);
-    const total = G.zones.reduce((s, z) => s + area(z), 0);
+  function randomPointIn(z) {
     for (let i = 0; i < 40; i++) {
-      let r = Math.random() * total, z = G.zones[0];
-      for (const zz of G.zones) { if ((r -= area(zz)) <= 0) { z = zz; break; } }
       const p = { x: rand(z.x0, z.x1), y: rand(z.y0, z.y1) };
       if (!blocked(p.x, p.y)) return p;
     }
-    return { x: G.W * 0.3, y: G.zones[0].y1 };
+    return { x: G.W * 0.3, y: z.y1 };
   }
   // Pick the roomiest of a few random spots so ducks and their tags don't pile up
-  function landPoint(selfId) {
+  function landPoint(selfId, side) {
+    const z = zone(side);
     const others = [...rt.values()].filter((e) => e.id !== selfId && e.mode === 'land');
     let best = null, bestScore = -1;
     for (let i = 0; i < 8; i++) {
-      const p = randomLandPoint();
+      const p = randomPointIn(z);
       const score = others.reduce((m, e) => Math.min(m, Math.hypot((e.tx - p.x) / 1.6, e.ty - p.y)), Infinity);
       if (score > bestScore) { best = p; bestScore = score; }
     }
     return best;
   }
-  const inLand = (x, y) => G.zones.some((z) => x >= z.x0 && x <= z.x1 && y >= z.y0 && y <= z.y1) && !blocked(x, y);
-  const swimY = () => rand(G.riverTop + 72 * G.scale, Math.max(G.riverTop + 72 * G.scale + 1, G.riverBottom - 6));
+  const inZone = (e) => { const z = zone(e.side); return e.x >= z.x0 && e.x <= z.x1 && e.y >= z.y0 && e.y <= z.y1 && !blocked(e.x, e.y); };
 
   // ---------- Runtime duck entities ----------
   const rt = new Map(); // id -> entity
@@ -173,22 +214,24 @@
   const pointer = { x: 0, y: 0, active: false };
 
   function makeEntity(d, opts = {}) {
-    const done = !!d.completedAt;
     const el = document.createElement('button');
     el.type = 'button';
-    el.className = 'duck' + (done ? ' done' : '');
-    el.innerHTML = `${done ? '' : '<span class="tag"></span>'}<img class="spr" alt="" draggable="false">`;
-    if (done) { el.tabIndex = -1; el.setAttribute('aria-hidden', 'true'); }
+    el.className = 'duck';
+    el.innerHTML = '<span class="tag"></span><img class="spr" alt="" draggable="false">';
     world.appendChild(el);
+    const side = realSide(opts.side || (Math.random() < 0.5 ? 'top' : 'bottom'));
     const e = {
       id: d.id, el, img: el.querySelector('.spr'), tagEl: el.querySelector('.tag'),
-      x: 0, y: 0, tx: 0, ty: 0, dir: 1, mode: done ? 'swim' : 'land',
-      t: 0, pause: rand(0.5, 3), pose: 'idle', sprite: null, timer: 0, opacity: 1,
-      ...opts,
+      x: 0, y: 0, tx: 0, ty: 0, dir: 1, side, mode: 'land', route: null,
+      t: 0, pause: rand(0.5, 3), pose: 'idle', sprite: null, timer: 0, bumpCd: 0,
+      ...opts, side,
     };
-    if (e.mode === 'land' && !opts.x) { const p = landPoint(); e.x = p.x; e.y = p.y; e.tx = p.x; e.ty = p.y; }
-    if (e.mode === 'swim' && !opts.x) { e.x = rand(40, G.W - 40); e.y = swimY(); e.dir = Math.random() < 0.5 ? -1 : 1; }
-    el.addEventListener('click', (ev) => { ev.stopPropagation(); if (!byId(e.id)?.completedAt) openCard(e.id); });
+    if (opts.mode === 'swim') {
+      e.x = rand(40, G.W - 40); e.y = swimY(); e.dir = Math.random() < 0.5 ? -1 : 1;
+      e.tagEl.remove(); e.tagEl = null;
+    } else if (opts.x === undefined) { const p = landPoint(d.id, side); e.x = p.x; e.y = p.y; }
+    e.tx = e.x; e.ty = e.y;
+    el.addEventListener('click', (ev) => { ev.stopPropagation(); openCard(e.id); });
     el.addEventListener('pointerenter', () => { hoverId = e.id; showBubble(e.id); });
     el.addEventListener('pointerleave', () => { if (hoverId === e.id) hoverId = null; hideBubble(e.id); });
     el.addEventListener('focus', () => showBubble(e.id));
@@ -204,15 +247,27 @@
     e.el.classList.toggle('sulky', m === 'sulky');
     e.el.classList.toggle('mad', m === 'mad');
     if (e.tagEl) e.tagEl.textContent = tagText(d.task);
-    e.el.setAttribute('aria-label', `${d.task}. ${moodText(d)}. Open task`);
+    e.el.setAttribute('aria-label', `${d.task}. ${isDone(d) ? doneText(d) : dueText(d)}. Open task`);
   }
   function removeEntity(id) {
     const e = rt.get(id);
     if (!e) return;
     e.el.remove();
-    if (e.feedEl) e.feedEl.remove();
     rt.delete(id);
     if (bubble.dataset.id === id) hideBubble(id);
+  }
+  function makeSwimmer(e) { // done ducks in the pond can still be opened
+    e.el.classList.remove('leaving');
+    e.el.removeAttribute('aria-hidden');
+    e.el.tabIndex = 0;
+    refreshEntity(e);
+  }
+  function retire(e) { // not clickable while it leaves (heading to the pond, the farmhouse or flying away)
+    if (hoverId === e.id) hoverId = null;
+    hideBubble(e.id);
+    e.el.tabIndex = -1;
+    e.el.setAttribute('aria-hidden', 'true');
+    e.el.classList.add('leaving');
   }
 
   function setSprite(e, key, wantDir) {
@@ -235,6 +290,31 @@
     return false;
   }
 
+  // Routes: a list of waypoints. Going to the other bank means walking off the
+  // nearest screen edge and coming back on at the same edge on the other side.
+  function routeTo(e, p, side) {
+    side = realSide(side);
+    e.tx = p.x; e.ty = p.y;
+    if (side === e.side) { e.route = [{ x: p.x, y: p.y }]; return; }
+    const edge = e.x < G.W / 2 ? -70 : G.W + 70;
+    const zs = zone(e.side), zt = zone(side);
+    e.route = [
+      { x: edge, y: clamp(e.y, zs.y0, zs.y1) },
+      { x: edge, y: clamp(p.y, zt.y0, zt.y1), teleport: true, side },
+      { x: p.x, y: p.y },
+    ];
+  }
+  function followRoute(e, speed, dt) {
+    while (e.route && e.route.length) {
+      const p = e.route[0];
+      if (p.teleport) { e.x = p.x; e.y = p.y; e.side = p.side; e.route.shift(); continue; }
+      if (!moveToward(e, p.x, p.y, speed, dt)) return false;
+      e.route.shift();
+    }
+    e.route = null;
+    return true;
+  }
+
   // ---------- Update loop ----------
   function updateLand(e, d, dt) {
     const m = mood(d);
@@ -246,28 +326,35 @@
       setSprite(e, 'happy');
       return;
     }
+    if (openId === e.id && e.stepTarget) {
+      if (moveToward(e, e.stepTarget.x, e.stepTarget.y, still ? 9999 : 140, dt)) e.stepTarget = null;
+      setSprite(e, frame(e, A.walk, 8));
+      return;
+    }
     if (m === 'mad') {
       if (held || still) { setSprite(e, held && !still ? frame(e, A.angry, 4) : 'angry1'); return; }
       if (isMobile()) {
-        // Drift to the front of the screen and peck
-        if (moveToward(e, G.front.x, G.front.y, 70, dt)) setSprite(e, frame(e, A.peck, 4), 1);
-        else setSprite(e, frame(e, A.walk, 7));
+        // Go to the front of the screen (round the river if needed) and peck
+        const far = e.side !== realSide('bottom') || Math.hypot(e.x - G.front.x, e.y - G.front.y) > 3;
+        if (!e.route && far) routeTo(e, { ...G.front }, 'bottom');
+        if (e.route) { followRoute(e, 70, dt); setSprite(e, frame(e, A.walk, 7)); }
+        else setSprite(e, frame(e, A.peck, 4), 1);
         return;
       }
+      e.route = null;
       if (pointer.active) {
-        const dx = pointer.x - e.x, dy = pointer.y + 20 - e.y, dist = Math.hypot(dx, dy);
+        // Chases the cursor but stays on its own bank
+        const z = zone(e.side);
+        const tx = clamp(pointer.x, 20, G.W - 20);
+        const ty = clamp(pointer.y + 20, z.y0 - 20, z.y1);
+        const dx = tx - e.x, dy = ty - e.y, dist = Math.hypot(dx, dy);
+        if (Math.abs(pointer.x - e.x) > 1) e.dir = pointer.x > e.x ? 1 : -1;
         if (dist > 95) {
           const k = Math.min(dist - 95, 130 * dt) / dist;
           e.x += dx * k; e.y += dy * k;
-          e.dir = dx > 0 ? 1 : -1;
           setSprite(e, frame(e, A.run, 9));
-        } else {
-          e.dir = dx > 0 ? 1 : -1;
-          setSprite(e, frame(e, A.angry, 4));
-        }
-      } else {
-        setSprite(e, frame(e, A.angry, 3));
-      }
+        } else setSprite(e, frame(e, A.angry, 4));
+      } else setSprite(e, frame(e, A.angry, 3));
       return;
     }
 
@@ -277,23 +364,79 @@
     if (e.pause > 0) {
       e.pause -= dt;
       setSprite(e, m === 'sulky' ? frame(e, A.restless, 2.5) : e.pose);
-      if (e.pause <= 0) {
-        const p = landPoint(e.id);
-        // Sulky ducks don't wander far
-        if (m === 'sulky') { p.x = e.x + (p.x - e.x) * 0.25; p.y = e.y + (p.y - e.y) * 0.25; }
-        e.tx = p.x; e.ty = p.y;
-      }
+      if (e.pause <= 0) pickWander(e, m);
       return;
     }
-    if (moveToward(e, e.tx, e.ty, m === 'sulky' ? 14 : 30, dt)) {
+    if (!e.route) pickWander(e, m);
+    if (followRoute(e, m === 'sulky' ? 14 : 30, dt)) {
       e.pause = rand(2, 6);
       e.pose = IDLE_POSES[Math.floor(Math.random() * IDLE_POSES.length)];
     }
     setSprite(e, frame(e, A.walk, m === 'sulky' ? 3 : 5));
   }
+  function pickWander(e, m) {
+    if (m === 'sulky') { // sulky ducks don't go far
+      const p = landPoint(e.id, e.side);
+      routeTo(e, { x: e.x + (p.x - e.x) * 0.25, y: e.y + (p.y - e.y) * 0.25 }, e.side);
+      return;
+    }
+    const cross = G.zones.top && G.zones.bottom && Math.random() < CROSS_CHANCE;
+    const side = cross ? otherSide(e.side) : e.side;
+    routeTo(e, landPoint(e.id, side), side);
+  }
+
+  // Ducks that touch bounce off and walk away from each other
+  function bumpDucks() {
+    const list = [...rt.values()].filter((e) => e.mode === 'land' && !reduceMotion.matches && e.x > 0 && e.x < G.W);
+    const rx = 62 * G.scale, ry = 26 * G.scale;
+    for (let i = 0; i < list.length; i++) {
+      for (let j = i + 1; j < list.length; j++) {
+        const a = list[i], b = list[j];
+        if (a.side !== b.side || a.bumpCd > 0 || b.bumpCd > 0) continue;
+        const dx = b.x - a.x, dy = b.y - a.y;
+        if ((dx / rx) ** 2 + (dy / ry) ** 2 >= 1) continue;
+        const ang = Math.atan2(dy || 0.01, dx || (Math.random() - 0.5));
+        [[a, -1], [b, 1]].forEach(([e, s]) => {
+          e.bumpCd = 1.5;
+          if (openId === e.id || hoverId === e.id || mood(byId(e.id)) === 'mad') return;
+          const z = zone(e.side), dist = rand(70, 130);
+          const p = { x: clamp(e.x + Math.cos(ang) * s * dist, z.x0, z.x1), y: clamp(e.y + Math.sin(ang) * s * dist * 0.6, z.y0, z.y1) };
+          e.route = [p]; e.tx = p.x; e.ty = p.y; e.pause = 0; e.timer = 0;
+          e.dir = p.x > e.x ? 1 : -1;
+        });
+      }
+    }
+  }
+
+  const swimY = () => rand(G.riverTop + 72 * G.scale, Math.max(G.riverTop + 72 * G.scale + 1, G.riverBottom - 6));
+
+  // Done ducks walk to the nearest bank and get in the river
+  function startToRiver(e) {
+    e.mode = 'toRiver'; e.t = 0; e.lift = 0;
+    const x = clamp(e.x, 40, G.W - 40);
+    const y = e.side === 'top' ? G.riverTop + 72 * G.scale : G.riverBottom - 6;
+    e.route = [{ x, y }];
+    if (e.tagEl) { e.tagEl.remove(); e.tagEl = null; }
+  }
+  // Only the latest 10 swim; older ones paddle off and move into the farmhouse
+  function riverKeep() {
+    const keep = new Set(riverDucks().map((d) => d.id));
+    if (pending?.type === 'done') keep.add(pending.id);
+    return keep;
+  }
+  function trimRiver() {
+    const keep = riverKeep();
+    rt.forEach((e) => {
+      if (e.mode !== 'swim' || keep.has(e.id)) return;
+      if (openId === e.id) closeCard(false);
+      e.leaving = true;
+      retire(e);
+    });
+  }
 
   function update(e, dt) {
     e.t += dt;
+    if (e.bumpCd > 0) e.bumpCd -= dt;
     const d = byId(e.id);
     switch (e.mode) {
       case 'land':
@@ -301,61 +444,49 @@
         break;
       case 'hatch': {
         const i = Math.floor(e.t / 0.24);
-        if (i >= A.hatch.length + 2) {
-          e.mode = 'land'; e.t = 0; e.pause = 0;
-          const p = landPoint(); e.tx = p.x; e.ty = p.y;
-          e.el.classList.remove('hatching');
-        } else setSprite(e, A.hatch[Math.min(i, A.hatch.length - 1)], 1);
+        if (i >= A.hatch.length + 2) { e.mode = 'land'; e.t = 0; e.pause = 0; e.route = null; }
+        else setSprite(e, A.hatch[Math.min(i, A.hatch.length - 1)], 1);
         break;
       }
-      case 'eat':
-        setSprite(e, frame(e, A.peck, 3.5), e.dir);
-        break;
-      case 'happy':
+      case 'love': // little happy hops under the hearts, then off to the pond
         setSprite(e, 'happy');
-        if ((e.timer -= dt) <= 0) {
-          e.mode = 'toRiver'; e.t = 0;
-          const intoTop = e.y < (G.riverTop + G.riverBottom) / 2;
-          e.tx = e.x; e.ty = intoTop ? G.riverTop + 80 * G.scale : G.riverBottom - 6;
-          if (e.tagEl) { e.tagEl.remove(); e.tagEl = null; }
-        }
+        e.lift = reduceMotion.matches ? 0 : Math.abs(Math.sin(e.t * Math.PI * 2.4)) * 10 * G.scale;
+        if ((e.timer -= dt) <= 0) startToRiver(e);
         break;
       case 'toRiver':
-        if (moveToward(e, e.tx, e.ty, reduceMotion.matches ? 9999 : 70, dt)) {
+        if (followRoute(e, reduceMotion.matches ? 9999 : 75, dt)) {
           e.mode = 'swim'; e.t = 0; e.dir = Math.random() < 0.5 ? -1 : 1;
-          e.el.classList.add('done'); e.el.tabIndex = -1; e.el.setAttribute('aria-hidden', 'true');
+          makeSwimmer(e);
           trimRiver();
         } else setSprite(e, frame(e, A.walk, 7));
         break;
-      case 'swim': {
-        if (!reduceMotion.matches) {
-          const speed = e.leaving ? 60 : 16;
-          e.x += e.dir * speed * dt;
+      case 'swim':
+        if (!reduceMotion.matches && openId !== e.id) { // holds still while its card is open
+          e.x += e.dir * (e.leaving ? 60 : 16) * dt;
           if (e.leaving && (e.x < -80 || e.x > G.W + 80)) { removeEntity(e.id); return; }
           if (!e.leaving && (e.x < -70 || e.x > G.W + 70)) e.x = e.dir > 0 ? -60 : G.W + 60;
         }
-        setSprite(e, e.shakeT > 0 ? 'shake' : frame(e, A.swim, 2));
-        if (e.shakeT > 0) e.shakeT -= dt;
-        else if (Math.random() < dt / 25) e.shakeT = 0.9;
+        setSprite(e, frame(e, A.swim, 2));
+        break;
+      case 'toFarm': { // paddle out on the top bank, then waddle to the farmhouse door
+        const wet = e.y > G.riverTop + 30 * G.scale;
+        if (followRoute(e, reduceMotion.matches ? 9999 : (wet ? 55 : 75), dt)) { e.mode = 'enter'; e.t = 0; }
+        setSprite(e, wet ? frame(e, A.swim, 3) : frame(e, A.walk, 7));
         break;
       }
-      case 'fly': {
+      case 'enter': // goes in through the door
+        e.el.style.opacity = Math.max(0, 1 - e.t / 0.4);
+        if (e.t > 0.4 || reduceMotion.matches) { removeEntity(e.id); return; }
+        break;
+      case 'fly':
         e.x += 120 * dt; e.y -= 170 * dt;
-        e.opacity = Math.max(0, 1 - e.t / 1.5);
+        e.el.style.opacity = Math.max(0, 1 - e.t / 1.5);
         setSprite(e, frame(e, A.fly, 8), 1);
         if (e.t > 1.5) { removeEntity(e.id); return; }
         break;
-      }
     }
-    e.el.style.transform = `translate(${e.x.toFixed(1)}px, ${e.y.toFixed(1)}px)`;
+    e.el.style.transform = `translate(${e.x.toFixed(1)}px, ${(e.y - (e.lift || 0)).toFixed(1)}px)`;
     e.el.style.zIndex = e.mode === 'fly' ? 14000 : Math.round(e.y);
-    if (e.mode === 'fly') e.el.style.opacity = e.opacity;
-  }
-
-  function trimRiver() {
-    const swimming = [...rt.values()].filter((e) => e.mode === 'swim' && !e.leaving);
-    const keep = new Set(riverDucks().map((d) => d.id));
-    swimming.forEach((e) => { if (!keep.has(e.id)) e.leaving = true; });
   }
 
   let last = performance.now();
@@ -369,15 +500,20 @@
     const m = madId();
     if (m !== currentMad) { currentMad = m; rt.forEach(refreshEntity); }
     rt.forEach((e) => update(e, dt));
+    bumpDucks();
     if (bubble.dataset.id) positionBubble();
-    tickToast(rawDt); // undo window runs on real time
+    tickPending(rawDt); // undo window runs on real time
     requestAnimationFrame(tick);
   }
 
-  // Each day is a fresh checklist: yesterday's fed ducks retire to the farmhouse
+  // Each day is a fresh start: yesterday's swimmers move into the farmhouse (no animation)
   function dailyReset() {
-    const keep = new Set(riverDucks().map((d) => d.id));
-    rt.forEach((e, id) => { if (e.mode === 'swim' && !keep.has(id)) removeEntity(id); });
+    const keep = riverKeep();
+    rt.forEach((e, id) => {
+      if (e.mode !== 'swim' || keep.has(id)) return;
+      if (openId === id) closeCard(false);
+      removeEntity(id);
+    });
     rt.forEach(refreshEntity);
     renderHud();
   }
@@ -386,26 +522,27 @@
   function renderHud() {
     const todo = active().length;
     const doneToday = ducks.filter((d) => d.completedAt && dateStr(d.completedAt) === today()).length;
-    $('hudCount').textContent = `${todo} to do · ${doneToday} fed today`;
-    const full = todo >= MAX_ACTIVE;
+    $('hudCount').textContent = `${todo} to do · ${doneToday} done today`;
+    const full = todo >= maxActive();
     egg.classList.toggle('full', full);
     egg.setAttribute('aria-disabled', String(full));
-    $('eggLabel').textContent = full ? 'Too many ducks! Feed one first' : 'Add duck';
+    $('eggLabel').textContent = full ? "Too many ducks! Let's finish some tasks first" : 'Add duck';
     $('toolsClock').textContent = offsetDays ? `Pretending it's ${prettyDate(today())}` : `Today is ${prettyDate(today())}`;
   }
 
   // ---------- Hover bubble ----------
   function showBubble(id) {
-    if (openId === id) return;
-    const d = byId(id);
-    if (!d) return;
-    const m = mood(d);
+    const d = byId(id), e = rt.get(id);
+    if (!d || !e || openId === id || e.el.classList.contains('leaving')) return;
     bubble.innerHTML = '';
     const task = document.createElement('span');
-    task.textContent = d.task;
+    task.textContent = clip(d.task, BUBBLE_CHARS);
     const md = document.createElement('span');
-    md.className = 'b-mood ' + m;
-    md.textContent = moodText(d);
+    if (isDone(d)) { md.className = 'b-mood done'; md.textContent = doneText(d); }
+    else {
+      md.className = 'b-mood ' + mood(d) + (d.due === today() && !overdue(d) ? ' today' : '');
+      md.textContent = dueText(d);
+    }
     bubble.append(task, md);
     bubble.dataset.id = id;
     bubble.hidden = false;
@@ -419,27 +556,36 @@
   function positionBubble() {
     const e = rt.get(bubble.dataset.id);
     if (!e || openId === e.id) { hideBubble(); return; }
-    const above = e.tagEl ? G.duckH + 30 : G.duckH + 6;
     const bw = bubble.offsetWidth, bh = bubble.offsetHeight;
-    const x = Math.min(G.W - bw - 8, Math.max(8, e.x - bw / 2));
-    const y = Math.max(8, e.y - above - bh - 10);
+    const x = clamp(e.x - bw / 2, 8, G.W - bw - 8);
+    const y = Math.max(8, e.y - G.duckH - 30 - bh - 10);
     bubble.style.transform = `translate(${x}px, ${y}px)`;
   }
 
   // ---------- Card ----------
   function openCard(id) {
     const d = byId(id), e = rt.get(id);
-    if (!d || !e || e.mode !== 'land') return;
+    const ticked = isDone(d);
+    if (!d || !e || e.el.classList.contains('leaving') || !(e.mode === 'land' || e.mode === 'swim' || ticked)) return;
     closeCard(false);
     openId = id;
+    e.el.classList.add('open');
     hideBubble();
-    $('cardTask').textContent = d.task;
+    $('cardTaskText').textContent = d.task;
     $('cardNotes').textContent = d.notes || '';
-    const md = $('cardMood');
-    md.textContent = moodText(d);
-    md.className = 'card-mood ' + mood(d);
-    $('cardCheck').checked = false;
-    closeMenu();
+    const due = $('cardMood');
+    if (ticked) { due.textContent = doneText(d); due.className = 'card-due done-at'; }
+    else {
+      due.textContent = dueText(d);
+      due.className = 'card-due ' + mood(d) + (d.due === today() && !overdue(d) ? ' today' : '');
+    }
+    // Show the ticked state without replaying the animation
+    card.classList.add('no-anim');
+    card.classList.toggle('done', ticked);
+    card.classList.toggle('reopenable', !!d.completedAt);
+    $('checkTip').textContent = d.completedAt ? 'Move back to to-do' : 'Mark done';
+    $('cardCheck').checked = ticked;
+    requestAnimationFrame(() => card.classList.remove('no-anim'));
     card.hidden = false;
     scrim.hidden = false;
     const sheet = isMobile();
@@ -447,46 +593,105 @@
     card.style.transform = '';
     if (sheet) {
       card.style.left = card.style.top = '';
+      // The sheet covers the bottom of the screen, so the duck steps up into view
+      // (staying on its own bank) so you can see it eat
+      card.classList.remove('tail-right');
+      card.style.setProperty('--tail-x', clamp(e.x - 12, 16, G.W - 40) + 'px');
+      const want = G.H - card.offsetHeight - 16;
+      if (e.mode === 'land' && e.y > want) {
+        const minY = e.side === 'bottom' ? G.riverBottom + G.duckH * 0.7 : 0;
+        e.stepTarget = { x: e.x, y: Math.max(minY, want) };
+        e.route = null;
+      }
     } else {
       // Next to the duck, never on top of it
       const cw = card.offsetWidth, ch = card.offsetHeight, gap = 46 * G.scale + 16;
       let x = e.x + gap;
       if (x + cw > G.W - 10) x = e.x - gap - cw;
-      x = Math.max(10, Math.min(G.W - cw - 10, x));
-      const y = Math.max(10, Math.min(G.H - ch - 10, e.y - G.duckH - 20));
+      x = clamp(x, 10, G.W - cw - 10);
+      const y = clamp(e.y - G.duckH - 20, 10, G.H - ch - 190); // keep clear of the undo bar
       card.style.left = x + 'px';
       card.style.top = y + 'px';
+      // Speech-bubble tail points at the duck's head from whichever side it's on
+      card.classList.toggle('tail-right', x < e.x);
+      card.style.setProperty('--tail-y', clamp(e.y - G.duckH * 0.7 - y - 13, 10, ch - 34) + 'px');
     }
+    placeToast();
     $('cardCheck').focus({ preventScroll: true });
   }
   function closeCard(restoreFocus = true) {
     if (!openId) return;
     const id = openId;
     openId = null;
+    rt.get(id)?.el.classList.remove('open');
     card.hidden = true;
     scrim.hidden = true;
-    closeMenu();
-    if (restoreFocus) rt.get(id)?.el.focus({ preventScroll: true });
+    placeToast();
+    const e = rt.get(id);
+    if (e) e.stepTarget = null;
+    if (restoreFocus && e && !e.el.classList.contains('leaving')) e.el.focus({ preventScroll: true });
   }
-  function openMenu() { $('cardMenu').hidden = false; $('cardMore').setAttribute('aria-expanded', 'true'); $('cardMenu').querySelector('button').focus(); }
-  function closeMenu() { $('cardMenu').hidden = true; $('cardMore').setAttribute('aria-expanded', 'false'); }
+  // While the mobile sheet is open the undo bar moves to the top, leaving the
+  // space between them clear for the duck
+  function placeToast() {
+    const sheetOpen = !card.hidden && card.classList.contains('sheet');
+    toast.classList.toggle('top', sheetOpen);
+  }
 
   scrim.addEventListener('pointerdown', (ev) => { ev.preventDefault(); ev.stopPropagation(); closeCard(); });
   $('cardClose').addEventListener('click', () => closeCard());
-  $('cardMore').addEventListener('click', () => ($('cardMenu').hidden ? openMenu() : closeMenu()));
-  $('cardMenu').addEventListener('click', (ev) => {
-    const act = ev.target.closest('button')?.dataset.act;
+  $('cardEdit').addEventListener('click', () => {
     const id = openId;
-    if (!act || !id) return;
-    closeMenu();
-    if (act === 'edit') { closeCard(false); openForm(id); }
-    if (act === 'delete') deleteDuck(id);
+    if (!id) return;
+    if (pending?.type === 'done' && pending.id === id) undoPending(); // changing it means it isn't done yet
+    closeCard(false);
+    openForm(id);
   });
   $('cardCheck').addEventListener('change', (ev) => {
-    if (!ev.target.checked || !openId) return;
-    const id = openId;
-    setTimeout(() => { closeCard(false); feedDuck(id); }, 180); // let the tick register visually
+    if (!openId) return;
+    if (ev.target.checked) { card.classList.add('done'); startDone(openId); }
+    else if (pending?.type === 'done' && pending.id === openId) undoPending();
+    else if (byId(openId)?.completedAt) reopen(openId);
   });
+
+  $('cardHouse').addEventListener('click', () => { if (openId) sendHome(openId); });
+
+  // A finished duck can leave the pond early and walk into the farmhouse
+  function sendHome(id) {
+    const d = byId(id), e = rt.get(id);
+    if (!d?.completedAt) return;
+    d.housed = true;
+    save();
+    closeCard(false);
+    if (!e) return;
+    retire(e);
+    const f = G.farm;
+    const door = { x: f.x + f.w * 0.47, y: f.y + f.h * 0.82 };
+    e.mode = 'toFarm'; e.t = 0;
+    e.route = [{ x: clamp(e.x, 20, G.W - 20), y: G.riverTop - 8 }, door];
+  }
+
+  // Unticking a duck from the pond puts the task back on the list:
+  // it paddles to the nearest bank and walks back onto the grass
+  function reopen(id) {
+    const d = byId(id), e = rt.get(id);
+    if (!d) return;
+    d.completedAt = null;
+    delete d.housed;
+    save();
+    closeCard(false);
+    if (e) {
+      const side = e.y - G.riverTop < G.riverBottom - e.y ? 'top' : 'bottom';
+      const at = { x: e.x, y: e.y, side };
+      removeEntity(id);
+      const n = makeEntity(d, at);
+      n.pause = 0;
+      n.el.focus({ preventScroll: true });
+    }
+    currentMad = madId();
+    rt.forEach(refreshEntity);
+    renderHud();
+  }
 
   // Swipe the bottom sheet down to close
   let swipe = null;
@@ -505,89 +710,125 @@
     swipe = null;
   });
 
-  // ---------- Feeding + undo countdown ----------
-  let pending = null; // { id, left, paused }
-  const toast = $('toast');
+  // ---------- Timed undo (tick off and delete) ----------
+  let pending = null; // { type: 'done' | 'delete', id, left, paused, ... }
 
-  function feedDuck(id) {
-    if (pending) finishFeed();
-    const e = rt.get(id);
-    if (!e) return;
-    e.mode = 'eat'; e.t = 0;
-    const fx = Math.max(30, Math.min(G.W - 30, e.x + e.dir * 46 * G.scale));
-    const feed = document.createElement('img');
-    feed.className = 'feed';
-    feed.src = src('feed');
-    feed.alt = '';
-    feed.style.width = Math.round(S.feed[0] * G.scale * 0.8) + 'px';
-    feed.style.left = fx + 'px';
-    feed.style.top = e.y + 'px';
-    feed.style.zIndex = Math.round(e.y) - 1;
-    world.appendChild(feed);
-    e.feedEl = feed;
-    pending = { id, left: UNDO_MS, paused: false };
-    $('toastText').textContent = `${tagText(byId(id).task)} fed`;
+  function startPending(p, text) {
+    if (pending) finishPending();
+    pending = { ...p, left: UNDO_MS, paused: false };
+    $('toastText').textContent = text;
     toast.hidden = false;
+    placeToast();
     toast.classList.remove('paused');
     $('toastFill').style.width = '100%';
   }
-  function tickToast(dt) {
+  function tickPending(dt) {
     if (!pending || pending.paused) return;
     pending.left -= dt * 1000;
     $('toastFill').style.width = Math.max(0, (pending.left / UNDO_MS) * 100) + '%';
-    if (pending.left <= 0) finishFeed();
+    if (pending.left <= 0) finishPending();
   }
-  function finishFeed() {
+  function finishPending() {
     if (!pending) return;
-    const { id } = pending;
+    const p = pending;
     pending = null;
     toast.hidden = true;
-    const d = byId(id), e = rt.get(id);
-    if (!d) return;
-    d.completedAt = now();
-    save();
-    if (e) {
-      if (e.feedEl) { const f = e.feedEl; f.style.opacity = '0'; setTimeout(() => f.remove(), 400); e.feedEl = null; }
-      e.mode = 'happy'; e.timer = 0.8; e.t = 0;
+    if (p.type === 'done') finishDone(p.id);
+    if (p.type === 'delete') { ducks = ducks.filter((x) => x.id !== p.id); save(); }
+    renderHud();
+  }
+  function undoPending() {
+    if (!pending) return;
+    const p = pending;
+    pending = null;
+    toast.hidden = true;
+    if (p.type === 'done') {
+      const e = rt.get(p.id), d = byId(p.id);
+      if (openId === p.id) { card.classList.remove('done'); $('cardCheck').checked = false; }
+      if (e && d) {
+        const at = { x: e.x, y: e.y, side: e.side };
+        removeEntity(p.id);
+        makeEntity(d, at).pause = 0; // walks straight back out if it got to the water
+      }
+    }
+    if (p.type === 'delete') {
+      const d = byId(p.id);
+      if (d) {
+        delete d.pendingDelete;
+        save();
+        removeEntity(p.id);
+        const e = makeEntity(d, { x: p.x, y: p.y, side: p.side });
+        e.timer = 1;
+        e.el.focus({ preventScroll: true });
+      }
     }
     renderHud();
   }
-  function undoFeed() {
-    if (!pending) return;
-    const e = rt.get(pending.id);
-    pending = null;
-    toast.hidden = true;
-    if (e) {
-      if (e.feedEl) { e.feedEl.remove(); e.feedEl = null; }
-      e.mode = 'land'; e.t = 0; e.pause = 1.5;
-      e.el.focus({ preventScroll: true });
-    }
-  }
-  $('toastUndo').addEventListener('click', undoFeed);
-  const pause = (p) => { if (pending) { pending.paused = p; toast.classList.toggle('paused', p); } };
+  $('toastUndo').addEventListener('click', undoPending);
+  $('toastDismiss').addEventListener('click', finishPending); // confirms it now instead of waiting
+  const pause = (v) => { if (pending) { pending.paused = v; toast.classList.toggle('paused', v); } };
   toast.addEventListener('pointerenter', () => pause(true));
   toast.addEventListener('pointerleave', () => { if (!toast.contains(document.activeElement)) pause(false); });
   toast.addEventListener('focusin', () => pause(true));
   toast.addEventListener('focusout', () => pause(false));
 
-  // ---------- Delete (confirmation, then fly away) ----------
+  // Tick: the card strikes through, then closes so you can watch the duck pop
+  // hearts and waddle into the pond. It's only saved as done when the undo window ends.
+  function startDone(id) {
+    const e = rt.get(id), d = byId(id);
+    if (!e || !d) return;
+    startPending({ type: 'done', id }, `“${tagText(d.task)}” done`);
+    if (e.stepTarget) { e.x = e.stepTarget.x; e.y = e.stepTarget.y; e.stepTarget = null; }
+    retire(e);
+    e.mode = 'love'; e.t = 0; e.route = null;
+    e.timer = reduceMotion.matches ? 0.3 : 1.4;
+    popHearts(e);
+    setTimeout(() => {
+      if (openId === id && pending?.type === 'done' && pending.id === id) closeCard(false);
+    }, reduceMotion.matches ? 300 : 800);
+  }
+  function popHearts(e) {
+    if (reduceMotion.matches) return;
+    [-14, 10, -2].forEach((dx, i) => {
+      const h = document.createElement('div');
+      h.className = 'heart';
+      h.innerHTML = HEART;
+      h.style.left = (e.x + dx * G.scale * 1.6) + 'px';
+      h.style.top = (e.y - G.duckH - 4) + 'px';
+      h.style.animationDelay = i * 0.22 + 's';
+      h.addEventListener('animationend', () => h.remove());
+      world.appendChild(h);
+    });
+  }
+  function finishDone(id) {
+    const d = byId(id), e = rt.get(id);
+    if (!d) return;
+    d.completedAt = now();
+    save();
+    if (openId === id) closeCard(false);
+    if (e?.mode === 'swim') trimRiver();
+  }
+
+  // Delete: confirmation, then the duck flies away with a timed undo
   async function deleteDuck(id) {
     const d = byId(id);
     closeCard(false);
     const ok = await confirmDialog({
       title: 'Delete this duck?',
-      body: `“${d.task}” will fly away for good.`,
+      body: `“${d.task}” will fly away.`,
       ok: 'Delete duck', cancel: 'Keep it',
     });
-    if (!ok) { rt.get(id)?.el.focus({ preventScroll: true }); return; }
-    ducks = ducks.filter((x) => x.id !== id);
-    save();
     const e = rt.get(id);
+    if (!ok) { e?.el.focus({ preventScroll: true }); return; }
+    if (pending) finishPending();
+    d.pendingDelete = true;
+    save();
+    startPending({ type: 'delete', id, x: e?.x, y: e?.y, side: e?.side }, `“${tagText(d.task)}” flew away`);
     if (e) {
+      retire(e);
       if (e.tagEl) { e.tagEl.remove(); e.tagEl = null; }
-      e.mode = reduceMotion.matches ? 'gone' : 'fly'; e.t = 0;
-      e.el.tabIndex = -1;
-      if (e.mode === 'gone') removeEntity(id);
+      if (reduceMotion.matches) removeEntity(id);
+      else { e.mode = 'fly'; e.t = 0; }
     }
     renderHud();
   }
@@ -635,12 +876,13 @@
     $('previewTag').textContent = v ? tagText(v) : 'Your task';
   }
   function openForm(id = null) {
-    if (!id && active().length >= MAX_ACTIVE) { nope(); return; }
+    if (!id && active().length >= maxActive()) { nope(); openList(); return; } // show what's left to finish
     editingId = id;
     const d = id ? byId(id) : null;
     lastFocus = document.activeElement;
     $('formTitle').textContent = d ? 'Edit duck' : 'New duck';
     $('fSubmit').textContent = d ? 'Save' : 'Hatch duck';
+    $('fDelete').hidden = !d;
     $('previewImg').src = src(d ? 'idle' : 'egg2');
     fTask.value = d ? d.task : '';
     fNotes.value = d ? d.notes || '' : '';
@@ -693,6 +935,12 @@
   });
   fDate.addEventListener('change', () => { if (fDate.value) setDue(fDate.value); });
   $('formClose').addEventListener('click', requestCloseForm);
+  $('fDelete').addEventListener('click', () => { // deleting throws away any edits too
+    const id = editingId;
+    formWrap.hidden = true;
+    editingId = null;
+    deleteDuck(id);
+  });
   formWrap.addEventListener('pointerdown', (ev) => { if (ev.target === formWrap) requestCloseForm(); });
 
   form.addEventListener('submit', (ev) => {
@@ -708,7 +956,7 @@
       const e = rt.get(d.id);
       currentMad = madId();
       rt.forEach(refreshEntity);
-      if (e && wasOverdue && !overdue(d)) { e.timer = 1.4; } // calmed down
+      if (e && wasOverdue && !overdue(d)) { e.timer = 1.4; e.route = null; } // calmed down
       hideForm();
     } else {
       const d = { id: 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), task, notes, due: formDue, createdAt: now(), completedAt: null };
@@ -723,9 +971,8 @@
   });
 
   function hatch(d) {
-    const e = makeEntity(d, { mode: reduceMotion.matches ? 'land' : 'hatch', x: G.eggPos.x, y: G.eggPos.y, dir: 1 });
-    if (reduceMotion.matches) { const p = landPoint(); e.x = p.x; e.y = p.y; }
-    else e.el.classList.add('hatching');
+    if (reduceMotion.matches) { makeEntity(d, { side: 'bottom' }); return; }
+    makeEntity(d, { mode: 'hatch', x: G.eggPos.x, y: G.eggPos.y, dir: 1, side: 'bottom' });
   }
 
   function nope() {
@@ -735,16 +982,81 @@
   }
   egg.addEventListener('click', () => openForm());
 
+  // ---------- To-do dropdown ----------
+  // Every task left, soonest first. Tapping one opens that duck's card,
+  // so ticking off still happens with the duck. History lives in the farmhouse.
+  const hud = $('hud'), drop = $('drop');
+  let dropTimer = 0;
+  function openList() {
+    closeCard(false);
+    const body = $('dropBody');
+    body.innerHTML = '';
+    const ticking = pending?.type === 'done' ? pending.id : null;
+    const todo = active().filter((d) => d.id !== ticking)
+      .sort((a, b) => (a.due < b.due ? -1 : a.due > b.due ? 1 : a.createdAt - b.createdAt));
+    const t = today(), tm = addDays(t, 1);
+    const group = (d) => (overdue(d) ? 'Overdue' : d.due === t ? 'Today' : d.due === tm ? 'Tomorrow' : 'Later');
+    if (!todo.length) {
+      body.innerHTML = '<div class="farm-empty"><p>Nothing to do. Tap the egg to add a duck.</p></div>';
+    }
+    let last = null;
+    todo.forEach((d) => {
+      if (group(d) !== last) {
+        const h = document.createElement('h3');
+        h.className = 'farm-day';
+        h.textContent = last = group(d);
+        body.appendChild(h);
+      }
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'farm-item list-item';
+      row.innerHTML = `<img src="${src(mood(d) === 'waiting' ? 'idle' : 'angry1')}" alt=""><span class="fi-task"></span><span class="fi-meta"></span>`;
+      row.querySelector('.fi-task').textContent = d.task;
+      const meta = row.querySelector('.fi-meta');
+      if (d.due !== t && d.due !== tm) meta.textContent = prettyDate(d.due); // the heading already says Today/Tomorrow
+      meta.classList.add(mood(d));
+      row.addEventListener('click', () => { closeList(false); openCard(d.id); });
+      body.appendChild(row);
+    });
+    hud.setAttribute('aria-expanded', 'true'); // widens the title card first so the list hangs straight off it
+    stage.style.setProperty('--drop-top', Math.round(hud.getBoundingClientRect().bottom - stage.getBoundingClientRect().top) + 'px');
+    clearTimeout(dropTimer);
+    drop.classList.remove('closing');
+    drop.hidden = false;
+    $('dropBody').scrollTop = 0;
+  }
+  function closeList(restoreFocus = true) {
+    if (drop.hidden) return;
+    hud.setAttribute('aria-expanded', 'false');
+    if (restoreFocus) hud.focus({ preventScroll: true });
+    drop.classList.add('closing'); // slides back up, then hides
+    clearTimeout(dropTimer);
+    dropTimer = setTimeout(() => {
+      if (drop.classList.contains('closing')) { drop.hidden = true; drop.classList.remove('closing'); }
+    }, reduceMotion.matches ? 0 : 220);
+  }
+  hud.addEventListener('click', () => (hud.getAttribute('aria-expanded') === 'true' ? closeList() : openList()));
+  // Clicking anywhere else closes it (and still does what was clicked)
+  document.addEventListener('pointerdown', (ev) => {
+    if (!drop.hidden && !drop.contains(ev.target) && !hud.contains(ev.target)) closeList(false);
+  });
+
   // ---------- Farmhouse ----------
   function openFarm() {
     lastFocus = document.activeElement;
     const list = $('farmList');
     list.innerHTML = '';
-    const done = ducks.filter((d) => d.completedAt).sort((a, b) => b.completedAt - a.completedAt);
-    if (!done.length) {
-      list.innerHTML = `<div class="farm-empty"><img src="${src('sleep')}" alt=""><p>No ducks here yet. Feed your first duck and it'll end up here.</p></div>`;
-    }
     const inRiver = new Set(riverDucks().map((d) => d.id));
+    const done = ducks.filter((d) => d.completedAt && !inRiver.has(d.id)).sort((a, b) => b.completedAt - a.completedAt);
+    if (inRiver.size) {
+      const n = document.createElement('p');
+      n.className = 'farm-note';
+      n.textContent = `${inRiver.size} ${inRiver.size === 1 ? 'duck is' : 'ducks are'} swimming in the river today. They'll move in tomorrow.`;
+      list.appendChild(n);
+    }
+    if (!done.length) {
+      list.insertAdjacentHTML('beforeend', `<div class="farm-empty"><img src="${src('sleep')}" alt=""><p>No ducks here yet. Ducks you finish swim in the river for the day, then move in here.</p></div>`);
+    }
     let day = null;
     done.forEach((d) => {
       const ds = dateStr(d.completedAt);
@@ -757,15 +1069,23 @@
       }
       const row = document.createElement('div');
       row.className = 'farm-item';
-      row.innerHTML = `<img src="${src(inRiver.has(d.id) ? 'swim1' : 'sleep')}" alt=""><span class="fi-task"></span><span class="fi-meta"></span>`;
+      row.innerHTML = `<img src="${src('sleep')}" alt=""><span class="fi-task"></span><span class="fi-meta"></span>`;
       row.querySelector('.fi-task').textContent = d.task;
-      row.querySelector('.fi-meta').textContent = inRiver.has(d.id) ? 'In the river' : new Date(d.completedAt).toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' });
+      row.querySelector('.fi-meta').textContent = new Date(d.completedAt).toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' });
       list.appendChild(row);
     });
     $('farmWrap').hidden = false;
     $('farmClose').focus();
   }
-  function closeFarm() { $('farmWrap').hidden = true; lastFocus?.focus?.({ preventScroll: true }); }
+  function closeFarm() {
+    $('farmWrap').hidden = true;
+    $('farmInfo').setAttribute('aria-expanded', 'false');
+    lastFocus?.focus?.({ preventScroll: true });
+  }
+  $('farmInfo').addEventListener('click', () => {
+    const on = $('farmInfo').getAttribute('aria-expanded') !== 'true';
+    $('farmInfo').setAttribute('aria-expanded', String(on));
+  });
   farmBtn.addEventListener('click', openFarm);
   $('farmClose').addEventListener('click', closeFarm);
   $('farmWrap').addEventListener('pointerdown', (ev) => { if (ev.target === $('farmWrap')) closeFarm(); });
@@ -777,10 +1097,10 @@
       if (!cw.hidden && cw._esc) return cw._esc();
       if (!formWrap.hidden) return requestCloseForm();
       if (!$('farmWrap').hidden) return closeFarm();
-      if (!$('cardMenu').hidden) { closeMenu(); $('cardMore').focus(); return; }
+      if (!drop.hidden) return closeList();
       if (openId) return closeCard();
     }
-    const typing = /INPUT|TEXTAREA/.test(document.activeElement?.tagName);
+    const typing = /INPUT|TEXTAREA/.test(document.activeElement?.tagName) && document.activeElement.type !== 'checkbox';
     const modalOpen = !formWrap.hidden || !$('confirmWrap').hidden || !$('farmWrap').hidden;
     if ((ev.key === 'n' || ev.key === 'N') && !typing && !modalOpen && !ev.metaKey && !ev.ctrlKey) {
       ev.preventDefault();
@@ -795,7 +1115,6 @@
     const r = stage.getBoundingClientRect();
     pointer.x = ev.clientX - r.left; pointer.y = ev.clientY - r.top; pointer.active = true;
   });
-  document.addEventListener('pointerleave', () => { pointer.active = false; });
   document.documentElement.addEventListener('mouseleave', () => { pointer.active = false; });
 
   // ---------- Prototype tools ----------
@@ -813,7 +1132,7 @@
         ['Call Mum', addDays(t, 1), 'Ask about Sunday lunch'],
         ['Finish portfolio case study', addDays(t, 3), 'Write up the Ducks in a row project'],
       ].forEach(([task, due, notes], i) => {
-        if (active().length >= MAX_ACTIVE) return;
+        if (active().length >= maxActive()) return;
         const d = { id: 's' + base.toString(36) + i + Math.random().toString(36).slice(2, 5), task, notes, due, createdAt: base + i, completedAt: null };
         ducks.push(d);
         makeEntity(d);
@@ -840,11 +1159,15 @@
   function relayout() {
     layout();
     rt.forEach((e) => {
-      if (e.mode === 'land' && !inLand(e.x, e.y)) { const p = landPoint(); e.x = p.x; e.y = p.y; e.tx = p.x; e.ty = p.y; }
-      if (e.mode === 'swim') e.y = Math.min(Math.max(e.y, G.riverTop + 72 * G.scale), G.riverBottom - 6);
+      if (e.mode === 'land' && !e.route) {
+        e.side = realSide(e.side);
+        if (!inZone(e)) { const p = landPoint(e.id, e.side); e.x = p.x; e.y = p.y; e.tx = p.x; e.ty = p.y; }
+      }
+      if (e.mode === 'swim') e.y = clamp(e.y, G.riverTop + 72 * G.scale, G.riverBottom - 6);
       e.sprite = null;
     });
     if (openId) openCard(openId);
+    renderHud(); // the duck limit depends on screen size
   }
   addEventListener('resize', relayout);
   // Fallback for browsers without overflow: clip — focus can scroll a hidden-overflow box
@@ -854,7 +1177,7 @@
   layout();
   currentMad = madId();
   active().forEach((d) => makeEntity(d));
-  riverDucks().forEach((d) => makeEntity(d));
+  riverDucks().forEach((d) => makeEntity(d, { mode: 'swim' }));
   lastDay = today();
   renderHud();
   requestAnimationFrame(tick);

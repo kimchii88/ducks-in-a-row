@@ -24,6 +24,7 @@ html, body {
   background: #8dc84f;
   color: var(--ink);
   font-family: var(--font);
+  font-variant-ligatures: none; /* Pixelify's "fi" ligature reads as "A" */
   -webkit-tap-highlight-color: transparent;
 }
 
@@ -54,13 +55,23 @@ button { font: inherit; color: inherit; cursor: pointer; }
   top: 12px;
   left: 12px;
   z-index: 20000;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
   padding: 6px 12px 7px;
+  text-align: left;
   background: var(--cream);
   border: var(--px) solid var(--ink);
   box-shadow: 0 var(--px) 0 var(--ink);
+  interpolate-size: allow-keywords; /* lets the width ease to and from auto */
+  transition: width 0.16s ease-out 0.18s; /* closing: shrink once the list has slid away */
 }
-.hud h1 { margin: 0; font-size: 18px; font-weight: 600; line-height: 1.1; }
-.hud p { margin: 2px 0 0; font-size: 13px; color: var(--ink-soft); }
+.hud:hover { background: #fff8e6; }
+.hud:active { transform: translateY(2px); box-shadow: 0 1px 0 var(--ink); }
+.hud:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
+.hud-title { font-size: 18px; font-weight: 600; line-height: 1.1; }
+.hud-chev { font-size: 13px; color: var(--ink-soft); }
+.hud-count { margin-top: 2px; font-size: 13px; color: var(--ink-soft); }
 
 /* ---------- Farmhouse ---------- */
 .farm {
@@ -110,8 +121,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
   outline: 3px solid var(--cream);
   outline-offset: 2px;
 }
-.duck.done { pointer-events: none; }
-.duck.done .spr { pointer-events: auto; cursor: default; }
+.duck.leaving, .duck.leaving .spr { pointer-events: none; }
 
 .tag {
   position: absolute;
@@ -128,16 +138,28 @@ button { font: inherit; color: inherit; cursor: pointer; }
   pointer-events: none;
 }
 .duck .tag { bottom: var(--tag-offset, 72px); }
+.duck.open .tag { visibility: hidden; } /* its speech bubble already shows the task */
 .duck.sulky .tag { border-color: var(--sulky); }
 .duck.mad .tag { border-color: var(--mad); background: #fde3dc; }
 
-.feed {
+/* Pixel hearts that float up when a duck is ticked off */
+.heart {
   position: absolute;
   left: 0;
   top: 0;
+  z-index: 14500;
+  width: 27px;
+  height: 24px;
   pointer-events: none;
-  transform: translate(-50%, -100%);
-  transition: opacity 0.4s;
+  opacity: 0;
+  animation: heart-float 1.1s steps(8) forwards;
+}
+.heart svg { display: block; width: 100%; height: 100%; }
+@keyframes heart-float {
+  0% { opacity: 0; transform: translate(-50%, 0) scale(0.6); }
+  15% { opacity: 1; transform: translate(-50%, -8px) scale(1); }
+  75% { opacity: 1; }
+  100% { opacity: 0; transform: translate(-50%, -48px) scale(1); }
 }
 
 /* ---------- Hover bubble ---------- */
@@ -147,9 +169,10 @@ button { font: inherit; color: inherit; cursor: pointer; }
   top: 0;
   z-index: 15000;
   max-width: 240px;
-  padding: 8px 10px;
-  font-size: 14px;
+  padding: 8px 12px 9px;
+  font-size: 15px;
   line-height: 1.35;
+  overflow-wrap: anywhere; /* long words wrap instead of spilling out */
   background: #fff;
   border: var(--px) solid var(--ink);
   pointer-events: none;
@@ -164,9 +187,18 @@ button { font: inherit; color: inherit; cursor: pointer; }
   border-top-color: var(--ink);
   border-bottom: 0;
 }
-.bubble .b-mood { display: block; margin-top: 2px; font-size: 12px; color: var(--ink-soft); }
-.bubble .b-mood.sulky { color: var(--sulky); }
-.bubble .b-mood.mad { color: var(--mad); }
+/* Same type and colours as the speech-bubble card: pixel title, readable Inter for the date */
+.bubble .b-mood {
+  display: block;
+  margin-top: 4px;
+  font-family: "Inter", system-ui, sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+  color: #6b5a4c;
+}
+.bubble .b-mood.today { color: #9a5b00; }
+.bubble .b-mood.done, .card-due.done-at { color: #3d6b18; }
+.bubble .b-mood.sulky, .bubble .b-mood.mad { color: #b0401a; }
 
 /* ---------- Egg (add duck) ---------- */
 .egg {
@@ -194,7 +226,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
   box-shadow: 0 var(--px) 0 var(--ink);
 }
 .egg:focus-visible .egg-label { outline: 3px solid #fff; outline-offset: 2px; }
-.egg.full .egg-label { background: #fde3dc; }
+.egg.full .egg-label { max-width: 230px; white-space: normal; text-align: center; background: #fde3dc; }
 .egg.nope img { animation: shake 0.4s; }
 
 @keyframes wobble {
@@ -212,110 +244,189 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .scrim { position: absolute; inset: 0; z-index: 20500; }
 
 .card {
+  --card-ink: #2c1a10;
+  --card-brown: #5c3a28;
+  --card-muted: #6b5a4c;
+  --card-done: #9a917c;
+  --card-overdue: #b0401a;
+  --card-bg: #faf3e0;
+  --b: 3px;
   position: absolute;
   z-index: 21000;
-  width: 280px;
-  padding: 12px 14px 14px;
-  background: var(--cream);
-  border: var(--px) solid var(--ink);
-  box-shadow: 4px 4px 0 rgba(44, 32, 22, 0.35);
+  width: fit-content; /* hugs short tasks, wraps long ones */
+  min-width: 220px;
+  max-width: 320px;
+  padding: 16px 12px 16px 16px;
+  font-family: "Inter", system-ui, sans-serif;
+  color: var(--card-ink);
+  background: var(--card-bg);
+  /* Pixel border with notched corners, plus a hard drop shadow */
+  box-shadow:
+    0 calc(var(--b) * -1) 0 var(--card-brown),
+    0 var(--b) 0 var(--card-brown),
+    calc(var(--b) * -1) 0 0 var(--card-brown),
+    var(--b) 0 0 var(--card-brown),
+    6px 7px 0 rgba(44, 26, 16, 0.3);
   user-select: text;
+  animation: bubble-pop 0.18s steps(3);
+}
+@keyframes bubble-pop {
+  from { opacity: 0; transform: scale(0.9); }
 }
 .card-handle { display: none; }
-.card-top {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 8px;
+.card-tail {
+  position: absolute;
+  top: var(--tail-y, 20px);
+  left: -18px;
+  width: 18px;
+  height: 24px;
 }
-.card-mood { font-size: 13px; color: var(--ink-soft); }
-.card-mood.sulky { color: var(--sulky); }
-.card-mood.mad { color: var(--mad); }
-.card-actions { display: flex; gap: 2px; margin-right: -6px; }
-
+.card-tail svg { display: block; width: 100%; height: 100%; }
+.card.tail-right .card-tail { left: auto; right: -18px; transform: scaleX(-1); }
+.card-actions {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  display: flex;
+  gap: 2px;
+}
+#cardClose { font-size: 15px; color: var(--card-muted); }
+#cardClose:hover { color: var(--card-ink); }
 .icon-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 44px;
   height: 44px;
-  margin: -8px 0;
   padding: 0;
   font-size: 20px;
   line-height: 1;
+  color: var(--card-ink, var(--ink));
   border: 0;
   background: none;
 }
-.icon-btn:hover { background: var(--cream-2); }
-.icon-btn:focus-visible { outline: 3px solid var(--ink); outline-offset: -6px; }
+.icon-btn:hover { background: rgba(92, 58, 40, 0.08); }
+.icon-btn:focus-visible { outline: 2px solid var(--card-brown, var(--ink)); outline-offset: -4px; }
 
-.menu {
-  position: absolute;
-  top: 36px;
-  right: -6px;
-  z-index: 2;
-  display: flex;
-  flex-direction: column;
-  min-width: 140px;
-  background: #fff;
-  border: var(--px) solid var(--ink);
-}
-.menu button {
-  padding: 10px 14px;
-  text-align: left;
-  border: 0;
-  background: none;
-}
-.menu button:hover, .menu button:focus-visible { background: var(--cream-2); outline: none; }
-.menu .danger { color: var(--red); }
-
-.check-row {
+.card-body {
   display: flex;
   align-items: flex-start;
-  gap: 12px;
-  cursor: pointer;
+  gap: 10px;
+  padding-right: 32px;
 }
-.check-row input {
+.check { flex: none; position: relative; cursor: pointer; padding: 7px; margin: -6px -4px -7px -7px; }
+.check input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.circle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: var(--b) solid var(--card-brown);
+  transition: background-color 0.2s;
+}
+.circle svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: #fff;
+  stroke-width: 3;
+  stroke-linecap: square;
+  stroke-linejoin: miter;
+  stroke-dasharray: 20;
+  stroke-dashoffset: 20;
+  transition: stroke-dashoffset 0.3s ease 0.15s;
+}
+.check:hover .circle { background: rgba(92, 58, 40, 0.08); }
+.check-tip {
   position: absolute;
+  bottom: calc(100% - 2px); /* above the box, clear of the due date */
+  left: 0;
+  z-index: 3;
+  padding: 3px 8px 4px;
+  font-size: 13px;
+  white-space: nowrap;
+  color: var(--cream);
+  background: var(--card-ink);
+  pointer-events: none;
+  visibility: hidden;
   opacity: 0;
-  width: 1px;
-  height: 1px;
+  transition: opacity 0.12s 0.3s; /* short delay so it doesn't flash on a quick tick */
 }
-.box {
-  flex: none;
-  position: relative;
-  width: 28px;
-  height: 28px;
-  margin-top: 1px;
-  background: #fff;
-  border: var(--px) solid var(--ink);
+.check:hover .check-tip, .check input:focus-visible ~ .check-tip { visibility: visible; opacity: 1; }
+.card.done:not(.reopenable) .check-tip, .card.sheet .check-tip { display: none; }
+.check input:focus-visible + .circle { outline: 3px solid var(--green); outline-offset: 3px; }
+
+.card-text { min-width: 0; padding-top: 2px; }
+.task-title {
+  margin: 0;
+  font-family: var(--font);
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
 }
-.check-row:hover .box { background: #eef7e2; }
-.check-row input:focus-visible + .box { outline: 3px solid var(--green); outline-offset: 2px; }
-.check-row input:checked + .box { background: var(--green); }
-.check-row input:checked + .box::after {
-  content: "";
-  position: absolute;
-  left: 7px;
-  top: 1px;
-  width: 7px;
-  height: 14px;
-  border: solid #fff;
-  border-width: 0 4px 4px 0;
-  transform: rotate(45deg);
+.strike {
+  color: var(--card-ink);
+  background-image: linear-gradient(currentColor, currentColor);
+  background-repeat: no-repeat;
+  background-position: 0 58%;
+  background-size: 0% 3px;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  transition: background-size 0.45s ease-out 0.1s, color 0.3s;
 }
-.task-text { font-size: 18px; line-height: 1.3; overflow-wrap: anywhere; }
+.card-due { margin: 6px 0 0; font-size: 14px; color: var(--card-muted); transition: color 0.3s; }
+.card-due.today { color: #9a5b00; } /* amber: due soon, not late yet (4.9:1 on cream) */
+.card-due.sulky, .card-due.mad { color: var(--card-overdue); }
 .notes {
-  margin: 10px 0 0 40px;
+  margin: 10px 0 0;
   font-size: 14px;
   line-height: 1.45;
-  color: var(--ink-soft);
+  color: var(--card-muted);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 .notes:empty { display: none; }
+.card-edit {
+  margin: 8px 0 0; /* the button's own padding makes this read as ~15px */
+  padding: 4px 10px 5px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--card-brown);
+  background: none;
+  border: 2px solid rgba(92, 58, 40, 0.3); /* faint at rest so it already reads as a button */
+}
+.notes:not(:empty) + .card-edit { margin-top: 12px; }
+.card-edit:hover, .card-edit:focus-visible {
+  outline: none;
+  background: #f1e5c6;
+  border-color: var(--card-brown);
+  box-shadow: 0 2px 0 var(--card-brown);
+}
+.card-edit:active { transform: translateY(2px); box-shadow: none; }
+.card.done .card-edit { visibility: hidden; }
+/* Pond ducks swap Edit for a way to send them home early */
+.card-house { display: none; }
+.card.reopenable #cardEdit { display: none; }
+.card.done.reopenable .card-house { display: inline-block; visibility: visible; }
+
+/* Reopening a ticked card shows the end state without replaying it */
+.card.no-anim *, .card.no-anim { transition: none !important; animation: none !important; }
+
+/* Ticked: strike through, grey out, circle bounces into a tick */
+.card.done .circle { background: var(--card-brown); animation: tick-bounce 0.45s ease-out; }
+.card.done .circle svg { stroke-dashoffset: 0; }
+.card.done .strike { color: var(--card-done); background-size: 100% 3px; }
+.card.done .card-due, .card.done .notes { color: #b5ad98; }
+.card.done .card-due.done-at { color: #3d6b18; }
+
+@keyframes tick-bounce {
+  0% { transform: scale(1); }
+  30% { transform: scale(0.78); }
+  65% { transform: scale(1.18); }
+  100% { transform: scale(1); }
+}
 
 /* Mobile: bottom sheet, duck stays visible above */
 .card.sheet {
@@ -323,18 +434,25 @@ button { font: inherit; color: inherit; cursor: pointer; }
   right: 0;
   bottom: 0;
   width: auto;
-  padding: 8px 18px max(20px, env(safe-area-inset-bottom));
-  border-width: var(--px) 0 0;
-  box-shadow: none;
+  min-width: 0;
+  max-width: none;
+  padding: 10px 16px max(24px, env(safe-area-inset-bottom)) 20px;
+  box-shadow: 0 calc(var(--b) * -1) 0 var(--card-brown);
+  animation: none;
   transition: transform 0.2s;
 }
+/* Tail points up at the duck standing above the sheet */
+.card.sheet .card-tail { top: -21px; left: var(--tail-x, 50%); transform: rotate(90deg); }
 .card.sheet .card-handle {
   display: block;
   width: 44px;
   height: 5px;
   margin: 0 auto 10px;
-  background: var(--wood);
+  border-radius: 3px;
+  background: #c9b48f;
 }
+.card.sheet .card-actions { top: 22px; }
+.card.sheet .task-title { font-size: 22px; }
 
 /* ---------- Undo toast ---------- */
 .toast {
@@ -365,10 +483,24 @@ button { font: inherit; color: inherit; cursor: pointer; }
   border: 0;
 }
 .undo-btn:hover { background: #fff; }
+.toast-btns { display: flex; flex: none; align-items: center; gap: 2px; }
+.undo-btn { white-space: nowrap; }
+.toast-x {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  font-size: 16px;
+  color: var(--cream);
+  background: none;
+  border: 0;
+}
+.toast-x:hover { background: rgba(251, 243, 220, 0.12); }
+.toast-x:focus-visible { outline: 3px solid #9fe07a; outline-offset: -3px; }
 .undo-btn:focus-visible { outline: 3px solid #9fe07a; outline-offset: 2px; }
 .toast-bar { height: 5px; background: #4a3a2a; }
 .toast-fill { height: 100%; width: 100%; background: #9fe07a; }
 .toast.paused .toast-fill { background: #e8c95a; }
+.toast.top { top: 76px; bottom: auto; }
 
 /* ---------- Modals ---------- */
 .modal-wrap {
@@ -427,6 +559,17 @@ input[type="text"]:focus, textarea:focus, .date-input:focus { outline: 3px solid
 input[aria-invalid="true"] { border-color: var(--red); }
 textarea { resize: vertical; margin-bottom: 14px; font-family: var(--font); }
 .field-error { margin: 6px 0 0 !important; font-size: 14px !important; color: var(--red) !important; }
+.delete-link {
+  display: block;
+  margin: 14px auto 0;
+  padding: 8px 12px;
+  font-size: 15px;
+  color: var(--red);
+  background: none;
+  border: 0;
+}
+.delete-link:hover { text-decoration: underline; text-underline-offset: 3px; }
+.delete-link:focus-visible { outline: 3px solid var(--red); outline-offset: 2px; }
 .link-btn {
   display: inline-block;
   margin: 10px 0 14px;
@@ -467,9 +610,87 @@ textarea { resize: vertical; margin-bottom: 14px; font-family: var(--font); }
 .primary-btn:focus-visible, .secondary-btn:focus-visible, .danger-btn:focus-visible { outline: 3px solid var(--green); outline-offset: 3px; }
 .primary-btn:active, .secondary-btn:active, .danger-btn:active { transform: translateY(2px); box-shadow: 0 1px 0 var(--ink); }
 
+/* ---------- To-do dropdown ---------- */
+.drop {
+  /* Clips the list so it slides out from behind the title card */
+  position: absolute;
+  top: var(--drop-top, 72px);
+  left: 12px;
+  z-index: 19990;
+  width: min(346px, calc(100% - 18px));
+  padding: 0 6px 7px 0; /* room for the shadow */
+  overflow: hidden;
+  pointer-events: none;
+}
+.drop-body {
+  max-height: min(60vh, calc(100vh - var(--drop-top, 72px) - 150px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px 12px 12px;
+  background: var(--cream);
+  border: var(--px) solid var(--ink);
+  border-top: 0;
+  box-shadow: 4px 5px 0 rgba(44, 32, 22, 0.35);
+  pointer-events: auto;
+  will-change: transform;
+  /* waits for the title card to finish widening */
+  animation: drop-in 0.34s cubic-bezier(0.22, 1, 0.36, 1) 0.12s backwards;
+}
+.drop.closing .drop-body { animation: drop-out 0.2s cubic-bezier(0.4, 0, 1, 1) forwards; }
+@keyframes drop-in { from { transform: translateY(-100%); } }
+@keyframes drop-out { to { transform: translateY(-100%); } }
+.drop .farm-day:first-child { margin-top: 8px; }
+.drop .farm-empty { padding: 16px 0 6px; font-size: 14px; color: var(--ink-soft); }
+.drop .farm-empty p { margin: 0; }
+/* Open: the title card widens and the list hangs off it as one panel */
+.hud[aria-expanded="true"] {
+  width: min(340px, calc(100% - 24px));
+  transition-delay: 0s;
+  border-bottom: 2px solid var(--cream-2);
+  box-shadow: 4px 0 0 rgba(44, 32, 22, 0.35);
+}
+.hud[aria-expanded="true"]:active { transform: none; }
+.hud[aria-expanded="true"] .hud-chev { display: inline-block; transform: rotate(180deg); }
+
+/* To-do rows open that duck's card */
+.list-item {
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+}
+.list-item:hover { border-color: var(--wood); }
+.list-item:focus-visible { outline: 3px solid var(--green); outline-offset: 1px; }
+.list-item .fi-meta.sulky, .list-item .fi-meta.mad { color: var(--red); }
+
 /* Farmhouse inventory */
 .modal-farm { width: min(460px, 100%); }
 .farm-sub { margin-bottom: 12px !important; }
+.info { position: absolute; top: 14px; right: 56px; }
+.info-btn {
+  width: 32px;
+  height: 32px;
+  margin: 6px;
+  font-size: 16px;
+  font-weight: 600;
+  border: var(--px) solid var(--ink);
+  border-radius: 50%;
+}
+.info-tip {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 3;
+  width: 220px;
+  padding: 8px 10px;
+  font-size: 14px;
+  line-height: 1.35;
+  color: var(--cream);
+  background: var(--ink);
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.info:hover .info-tip, .info-btn:focus-visible + .info-tip, .info-btn[aria-expanded="true"] + .info-tip { visibility: visible; opacity: 1; }
 .farm-day { margin: 14px 0 6px; font-size: 14px; color: var(--ink-soft); }
 .farm-item {
   display: flex;
@@ -483,6 +704,7 @@ textarea { resize: vertical; margin-bottom: 14px; font-family: var(--font); }
 .farm-item img { width: 32px; height: auto; flex: none; }
 .farm-item .fi-task { flex: 1; font-size: 15px; overflow-wrap: anywhere; }
 .farm-item .fi-meta { font-size: 12px; color: var(--ink-soft); white-space: nowrap; }
+.farm-note { margin: 0 0 4px !important; padding: 8px 10px; font-size: 14px !important; background: #dcefff; border: 2px solid #9cc6e8; }
 .farm-empty { padding: 24px 0 8px; text-align: center; }
 .farm-empty img { width: 64px; margin-bottom: 8px; }
 
@@ -512,8 +734,8 @@ textarea { resize: vertical; margin-bottom: 14px; font-family: var(--font); }
 .tools-clock { margin: 0; padding: 6px 10px; font-size: 12px; color: var(--ink-soft); border-top: 1px solid var(--cream-2); }
 
 @media (max-width: 640px) {
-  .hud h1 { font-size: 15px; }
-  .hud p { font-size: 12px; }
+  .hud-title { font-size: 15px; }
+  .hud-count { font-size: 12px; }
   .tools { bottom: auto; top: 12px; right: 12px; }
   .tools:not([open]) summary { font-size: 12px; }
   .toast { bottom: 112px; }
