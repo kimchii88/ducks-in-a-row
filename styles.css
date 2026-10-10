@@ -729,6 +729,11 @@ textarea { resize: vertical; margin-bottom: 14px; font-family: var(--font); }
    app.js). The backdrop still covers the whole screen, because iPhone keyboards
    are see-through. */
 .mobile .modal-wrap { padding-bottom: calc(16px + var(--kb, 0px)); }
+/* Chrome on iPhone hides its bottom toolbar when the keyboard opens, and that
+   space is outside the page, so it shows the page's base colour. Make that
+   cream while a full-screen panel is open, not meadow green. */
+html.mobile:has(.modal-wrap.full:not([hidden])),
+html.mobile:has(.modal-wrap.full:not([hidden])) body { background: var(--cream); }
 .mobile .modal-wrap.full {
   padding: 0 0 var(--kb, 0px);
   align-items: stretch;
