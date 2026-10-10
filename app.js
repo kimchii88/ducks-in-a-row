@@ -84,6 +84,14 @@
     const kb = Math.max(0, Math.round(innerHeight - vv.height - vv.offsetTop));
     document.documentElement.style.setProperty('--kb', kb + 'px');
     document.documentElement.classList.toggle('kb-open', kb > 100);
+    if (debugEl) debugEl.textContent = `screen ${innerHeight} · visible ${Math.round(vv.height)} · offset ${Math.round(vv.offsetTop)} · kb ${kb}`;
+  }
+  // ?debug shows the keyboard measurements on screen (for testing on a real phone)
+  let debugEl = null;
+  if (new URLSearchParams(location.search).has('debug')) {
+    debugEl = document.createElement('div');
+    debugEl.style.cssText = 'position:fixed;top:0;left:0;z-index:99999;padding:2px 6px;font:12px/1.4 monospace;color:#fff;background:rgba(0,0,0,.75);pointer-events:none';
+    document.body.appendChild(debugEl);
   }
   window.visualViewport?.addEventListener('resize', syncViewport);
   window.visualViewport?.addEventListener('scroll', syncViewport);
@@ -908,7 +916,10 @@
     updatePreview();
     formSnapshot = formState();
     formWrap.hidden = false;
-    fTask.focus();
+    // The form slides in by itself; without preventScroll iPhone browsers scroll
+    // the page towards the field while it's still off-screen, which throws off
+    // the keyboard measurement and lets the meadow show behind the keyboard
+    fTask.focus({ preventScroll: true });
   }
   function hideForm() {
     formWrap.hidden = true;
