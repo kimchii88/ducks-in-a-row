@@ -725,16 +725,14 @@ textarea { resize: vertical; margin-bottom: 14px; font-family: var(--font); }
 .mobile .tools:not([open]) summary { font-size: 12px; }
 .mobile .toast { bottom: 112px; }
 
-/* Every pop-up sits in the area above the keyboard (--vvh), so a confirmation
-   is never hidden behind it. The form and farmhouse fill that area. */
-.mobile .modal-wrap {
-  top: var(--vvt, 0px);
-  bottom: auto;
-  height: var(--vvh, 100%);
-}
+/* Pop-ups keep their content above the keyboard (--kb is its height, set in
+   app.js). The backdrop still covers the whole screen, because iPhone keyboards
+   are see-through. */
+.mobile .modal-wrap { padding-bottom: calc(16px + var(--kb, 0px)); }
 .mobile .modal-wrap.full {
-  padding: 0;
+  padding: 0 0 var(--kb, 0px);
   align-items: stretch;
+  background: var(--cream); /* cream behind the keyboard, not the meadow */
 }
 .mobile .modal-full {
   width: 100%;
@@ -772,9 +770,11 @@ textarea { resize: vertical; margin-bottom: 14px; font-family: var(--font); }
   background: var(--cream);
   border-top: 2px solid var(--cream-2);
 }
-/* Smaller duck preview so the task field is visible straight away */
+/* Smaller duck preview so the task field is visible straight away,
+   and none at all while typing so the due date options fit */
 .mobile .preview { flex-direction: row; justify-content: center; gap: 10px; padding: 6px 0; }
 .mobile .preview img { height: 40px; }
+.mobile.kb-open .modal-full .preview { display: none; }
 /* Bottom sheet closes with its × only (no swipe, no tapping outside) */
 
 @media (prefers-reduced-motion: reduce) {

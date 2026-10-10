@@ -76,13 +76,14 @@
   const maxActive = () => (isMobile() ? 8 : 15); // fewer ducks fit on a phone's meadow
   // isMobile is the single definition of "phone": styles hang off .mobile on <html>
   const syncMobile = () => document.documentElement.classList.toggle('mobile', isMobile());
-  // Track the area above the on-screen keyboard so full-screen panels and the
-  // sticky Hatch button sit above it (iOS doesn't resize the page for the keyboard)
+  // Measure the on-screen keyboard (--kb) so pop-ups keep their content above it.
+  // iOS doesn't resize the page for the keyboard, it just covers it.
   function syncViewport() {
     const vv = window.visualViewport;
     if (!vv) return;
-    document.documentElement.style.setProperty('--vvh', vv.height + 'px');
-    document.documentElement.style.setProperty('--vvt', vv.offsetTop + 'px');
+    const kb = Math.max(0, Math.round(innerHeight - vv.height - vv.offsetTop));
+    document.documentElement.style.setProperty('--kb', kb + 'px');
+    document.documentElement.classList.toggle('kb-open', kb > 100);
   }
   window.visualViewport?.addEventListener('resize', syncViewport);
   window.visualViewport?.addEventListener('scroll', syncViewport);
