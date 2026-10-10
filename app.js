@@ -88,6 +88,9 @@
     return new Date(y, m - 1, d).toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' });
   };
 
+  // Prototype tools (fake dates, sample ducks) only on localhost or with ?dev
+  const DEV = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) || new URLSearchParams(location.search).has('dev');
+
   // ---------- Storage ----------
   const KEY = 'ducks-in-a-row-v1';
   let ducks = [];
@@ -95,11 +98,20 @@
     try {
       const s = JSON.parse(localStorage.getItem(KEY));
       // A delete still in its undo window when the page closed counts as deleted
-      if (s) { ducks = (s.ducks || []).filter((d) => !d.pendingDelete); offsetDays = s.offsetDays || 0; }
+      if (s) { ducks = (s.ducks || []).filter((d) => !d.pendingDelete); offsetDays = DEV ? s.offsetDays || 0 : 0; }
     } catch (e) { /* storage unavailable: start fresh */ }
   }
   function save() {
     try { localStorage.setItem(KEY, JSON.stringify({ ducks, offsetDays })); } catch (e) { /* ignore */ }
+    if (ducks.length) protectStorage();
+  }
+  // Ask the browser not to clear our data when it's short on space. Asked once the
+  // first duck exists, since Firefox shows a prompt for it.
+  let protectAsked = false;
+  function protectStorage() {
+    if (protectAsked || !navigator.storage?.persist) return;
+    protectAsked = true;
+    navigator.storage.persisted().then((yes) => yes || navigator.storage.persist()).catch(() => {});
   }
 
   // ---------- Duck helpers ----------
@@ -527,7 +539,8 @@
     egg.classList.toggle('full', full);
     egg.setAttribute('aria-disabled', String(full));
     $('eggLabel').textContent = full ? "Too many ducks! Let's finish some tasks first" : 'Add duck';
-    $('toolsClock').textContent = offsetDays ? `Pretending it's ${prettyDate(today())}` : `Today is ${prettyDate(today())}`;
+    const clock = $('toolsClock'); // only exists in dev
+    if (clock) clock.textContent = offsetDays ? `Pretending it's ${prettyDate(today())}` : `Today is ${prettyDate(today())}`;
   }
 
   // ---------- Hover bubble ----------
@@ -1117,8 +1130,9 @@
   });
   document.documentElement.addEventListener('mouseleave', () => { pointer.active = false; });
 
-  // ---------- Prototype tools ----------
-  $('tools').addEventListener('click', async (ev) => {
+  // ---------- Prototype tools (dev only) ----------
+  if (!DEV) $('tools').remove();
+  else $('tools').addEventListener('click', async (ev) => {
     const tool = ev.target.closest('button')?.dataset.tool;
     if (!tool) return;
     const t = today();
