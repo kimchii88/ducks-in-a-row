@@ -25,12 +25,17 @@ html, body {
   margin: 0;
   height: 100%;
   overflow: hidden;
+  overscroll-behavior: none; /* no rubber-band bounce */
   background: #8dc84f;
   color: var(--ink);
   font-family: var(--font);
   font-variant-ligatures: none; /* Pixelify's "fi" ligature reads as "A" */
   -webkit-tap-highlight-color: transparent;
 }
+
+/* iPhone browsers still let you drag a page with overflow: hidden, which slides
+   the toolbars around and leaves a gap. Pinning the body stops that. */
+body { position: fixed; inset: 0; }
 
 button { font: inherit; color: inherit; cursor: pointer; }
 
@@ -513,6 +518,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
   position: relative;
   width: min(400px, 100%);
   max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px); /* dvh follows the phone's toolbars; vh is the fallback */
   overflow: auto;
   padding: 18px 20px 20px;
   background: var(--cream);
@@ -627,6 +633,7 @@ textarea { resize: vertical; margin-bottom: 14px; font-family: var(--font); }
 }
 .drop-body {
   max-height: min(60vh, calc(100vh - var(--drop-top, 72px) - 150px));
+  max-height: min(60dvh, calc(100dvh - var(--drop-top, 72px) - 150px));
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: 4px 12px 12px;
