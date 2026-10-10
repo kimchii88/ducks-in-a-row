@@ -665,32 +665,6 @@ textarea { resize: vertical; margin-bottom: 14px; font-family: var(--font); }
 /* Farmhouse inventory */
 .modal-farm { width: min(460px, 100%); }
 .farm-sub { margin-bottom: 12px !important; }
-.info { position: absolute; top: 14px; right: 56px; }
-.info-btn {
-  width: 32px;
-  height: 32px;
-  margin: 6px;
-  font-size: 16px;
-  font-weight: 600;
-  border: var(--px) solid var(--ink);
-  border-radius: 50%;
-}
-.info-tip {
-  position: absolute;
-  top: calc(100% + 4px);
-  right: 0;
-  z-index: 3;
-  width: 220px;
-  padding: 8px 10px;
-  font-size: 14px;
-  line-height: 1.35;
-  color: var(--cream);
-  background: var(--ink);
-  visibility: hidden;
-  opacity: 0;
-  transition: opacity 0.15s;
-}
-.info:hover .info-tip, .info-btn:focus-visible + .info-tip, .info-btn[aria-expanded="true"] + .info-tip { visibility: visible; opacity: 1; }
 .farm-day { margin: 14px 0 6px; font-size: 14px; color: var(--ink-soft); }
 .farm-item {
   display: flex;

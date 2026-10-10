@@ -1064,11 +1064,11 @@
     if (inRiver.size) {
       const n = document.createElement('p');
       n.className = 'farm-note';
-      n.textContent = `${inRiver.size} ${inRiver.size === 1 ? 'duck is' : 'ducks are'} swimming in the river today. They'll move in tomorrow.`;
+      n.textContent = `${inRiver.size} ${inRiver.size === 1 ? 'duck is' : 'ducks are'} swimming in the pond today. They'll move in tomorrow.`;
       list.appendChild(n);
     }
     if (!done.length) {
-      list.insertAdjacentHTML('beforeend', `<div class="farm-empty"><img src="${src('sleep')}" alt=""><p>No ducks here! Completed tasks will have ducks swimming for the day. They will sleep in here the next day.</p></div>`);
+      list.insertAdjacentHTML('beforeend', `<div class="farm-empty"><img src="${src('sleep')}" alt=""><p>No ducks are sleeping here yet! Finish some tasks and have them move in here soon.</p></div>`);
     }
     let day = null;
     done.forEach((d) => {
@@ -1090,15 +1090,7 @@
     $('farmWrap').hidden = false;
     $('farmClose').focus();
   }
-  function closeFarm() {
-    $('farmWrap').hidden = true;
-    $('farmInfo').setAttribute('aria-expanded', 'false');
-    lastFocus?.focus?.({ preventScroll: true });
-  }
-  $('farmInfo').addEventListener('click', () => {
-    const on = $('farmInfo').getAttribute('aria-expanded') !== 'true';
-    $('farmInfo').setAttribute('aria-expanded', String(on));
-  });
+  function closeFarm() { $('farmWrap').hidden = true; lastFocus?.focus?.({ preventScroll: true }); }
   farmBtn.addEventListener('click', openFarm);
   $('farmClose').addEventListener('click', closeFarm);
   $('farmWrap').addEventListener('pointerdown', (ev) => { if (ev.target === $('farmWrap')) closeFarm(); });
